@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Spin the Wheel</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <canvas id="confettiCanvas" class="confetti-canvas" aria-hidden="true"></canvas>
+  <button id="adminAccessButton" class="admin-access-button" type="button">Admin Access</button>
+
+  <div id="startOverlay" class="overlay overlay-attract is-visible" role="button" tabindex="0" aria-label="Open player form">
+    <div class="attract-banner" aria-hidden="true">
+      <p class="moving-text">Stand A Chance To Win • Stand A Chance To Win • Stand A Chance To Win • Stand A Chance To Win •</p>
+    </div>
+  </div>
+
+  <div id="playerModal" class="modal" aria-hidden="true">
+    <section class="modal-card" aria-label="Player details form">
+      <button id="closeFormButton" type="button" class="form-exit-button" aria-label="Close form">×</button>
+      <h2>Enter your details</h2>
+      <form id="playerForm" class="player-form">
+        <label for="nameInput">Name</label>
+        <input id="nameInput" name="name" type="text" required />
+
+        <label for="schoolInput">School</label>
+        <input id="schoolInput" name="school" type="text" required />
+
+        <label for="emailInput">Email</label>
+        <input id="emailInput" name="email" type="email" required />
+
+        <button type="submit">Continue to Wheel</button>
+      </form>
+    </section>
+  </div>
+
+  <div id="adminModal" class="modal" aria-hidden="true">
+    <section class="modal-card" aria-label="Admin access">
+      <button id="closeAdminModalButton" type="button" class="form-exit-button" aria-label="Close admin access">×</button>
+      <section id="exportLoginTools" class="export-tools" aria-label="Admin login for downloads">
+        <h2 class="export-tools__title">Admin login</h2>
+        <div class="export-admin">
+          <label class="export-date-group" for="exportAdminEmail">
+            <span>Admin email</span>
+            <input id="exportAdminEmail" type="email" value="katapills@gmail.com" />
+          </label>
+          <label class="export-date-group" for="exportAccessKey">
+            <span>Access key</span>
+            <input id="exportAccessKey" type="password" autocomplete="off" />
+          </label>
+        </div>
+        <button id="adminLoginButton" type="button">Login</button>
+      </section>
+      <section id="exportTools" class="export-tools" aria-label="Download registrations" hidden>
+        <h2 class="export-tools__title">Download registrations</h2>
+        <div class="export-date-range">
+          <label class="export-date-group" for="exportFromDate">
+            <span>From</span>
+            <input id="exportFromDate" type="date" />
+          </label>
+          <label class="export-date-group" for="exportToDate">
+            <span>To</span>
+            <input id="exportToDate" type="date" />
+          </label>
+        </div>
+        <button id="downloadExportButton" type="button">Download Excel</button>
+        <h2 class="export-tools__title">Manage wheel entries</h2>
+        <div class="export-entry-editor">
+          <label class="export-date-group" for="adminEntryInput">
+            <span>New entry label</span>
+            <input id="adminEntryInput" type="text" placeholder="e.g. Russell Hobbs Hamper" />
+          </label>
+          <button id="addAdminEntryButton" type="button">Add entry</button>
+        </div>
+        <ul id="adminEntriesList" class="admin-entries-list"></ul>
+      </section>
+    </section>
+  </div>
+
+  <div id="prizeOverlay" class="prize-overlay" aria-hidden="true">
+    <div class="prize-card">
+      <p id="prizeAnnouncementText" class="prize-announcement"></p>
+      <button id="prizeContinueButton" type="button" class="continue-button">Continue</button>
+    </div>
+  </div>
+
+  <div id="loseOverlay" class="lose-overlay" aria-hidden="true">
+    <div class="lose-card">
+      <p id="losePrimaryText" class="lose-primary"></p>
+      <p id="loseSecondaryText" class="lose-secondary"></p>
+      <button id="loseContinueButton" type="button" class="continue-button">Continue</button>
+    </div>
+  </div>
+
+  <main class="app">
+    <header class="app-header">
+      <img class="wheel-logo" src="/deans_logo.png" alt="Dean's logo" />
+      <p class="eyebrow">Prize Draw</p>
+      <h1>Spin the Wheel</h1>
+      <p class="subtitle">Register, spin, and see if you win.</p>
+    </header>
+
+    <section class="wheel-section" aria-label="Prize wheel">
+      <div class="pointer" aria-hidden="true"></div>
+      <canvas id="wheel" width="760" height="760" role="img" aria-label="Spinning prize wheel"></canvas>
+    </section>
+
+    <section class="controls" aria-label="Wheel controls">
+      <button id="spinButton" type="button">Spin</button>
+      <p id="currentPlayerText" class="current-player">Waiting for player details.</p>
+      <p id="resultText" class="result" aria-live="polite">Press spin to choose a winner.</p>
+    </section>
+
+
+  </main>
+
+  <script type="module" src="script.js"></script>
+</body>
+</html>
