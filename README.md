@@ -2,6 +2,32 @@
 
 A playful prize wheel experience built with Vite and a small Node/MongoDB backend.
 
+## Deploying on Vercel
+
+This project now deploys on Vercel as:
+
+- a static Vite frontend from `dist`
+- serverless API routes from `api/*`
+
+Set these project environment variables in Vercel before deploying:
+
+```bash
+MONGODB_URI="mongodb+srv://..."
+MONGODB_DB="SpinTheWheel"
+MONGODB_COLLECTION="spin_the_wheel_entries"
+MONGODB_ENTRIES_COLLECTION="spin_the_wheel_config"
+EXPORT_ADMIN_EMAIL="katapills@gmail.com"
+EXPORT_ACCESS_KEY="your-access-key"
+```
+
+Vercel should use:
+
+```bash
+Build Command: npm run build
+Output Directory: dist
+Install Command: npm install
+```
+
 ## MongoDB setup
 
 Registrations are now stored in your existing MongoDB database `SpinTheWheel` inside the collection `spin_the_wheel_entries` by default.
