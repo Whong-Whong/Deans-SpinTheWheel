@@ -20,6 +20,7 @@ const playerModal = document.getElementById("playerModal");
 const adminModal = document.getElementById("adminModal");
 const closeAdminModalButton = document.getElementById("closeAdminModalButton");
 const playerForm = document.getElementById("playerForm");
+const playerFormError = document.getElementById("playerFormError");
 const closeFormButton = document.getElementById("closeFormButton");
 const nameInput = document.getElementById("nameInput");
 const schoolInput = document.getElementById("schoolInput");
@@ -35,14 +36,21 @@ const downloadExportButton = document.getElementById("downloadExportButton");
 const adminEntryInput = document.getElementById("adminEntryInput");
 const addAdminEntryButton = document.getElementById("addAdminEntryButton");
 const adminEntriesList = document.getElementById("adminEntriesList");
+const resetPrizeWinsButton = document.getElementById("resetPrizeWinsButton");
+const prizeSearchInput = document.getElementById("prizeSearchInput");
+const prizeSortSelect = document.getElementById("prizeSortSelect");
 const wheelSection = document.querySelector(".wheel-section");
 
-const entriesUrl = "/entries.json";
-const siteUrl = import.meta.env.VITE_SITE_URL || import.meta.env.NEXT_PUBLIC_SITE_URL || window.location.origin;
+const siteUrl = (import.meta?.env?.VITE_SITE_URL || import.meta?.env?.NEXT_PUBLIC_SITE_URL || window.location.origin);
 const adminLoginApiUrl = new URL("/api/admin/login", siteUrl).toString();
 const publicEntriesApiUrl = new URL("/api/entries", siteUrl).toString();
 const adminEntriesApiUrl = new URL("/api/admin/entries", siteUrl).toString();
+const adminPrizeConfigApiUrl = new URL("/api/admin/prize-config", siteUrl).toString();
+const publicPrizeConfigApiUrl = new URL("/api/prize-config", siteUrl).toString();
+const adminPrizeWinApiUrl = new URL("/api/admin/prize-win", siteUrl).toString();
+const adminResetPrizeWinsApiUrl = new URL("/api/admin/reset-prize-wins", siteUrl).toString();
 const participantsApiUrl = new URL("/api/participants", siteUrl).toString();
+const spinResultsApiUrl = new URL("/api/winners", siteUrl).toString();
 const participantsExportApiUrl = new URL("/api/participants/export", siteUrl).toString();
 const storageKey = "spin-wheel-state-v1";
 const nonRemovablePrizes = new Set([
@@ -83,6 +91,7 @@ let idleLastTick = 0;
 let prizeAnnouncementTimeoutId = 0;
 let loseAnnouncementTimeoutId = 0;
 let exportAdminSession = null;
+let prizeConfigurations = {};
 let state = {
   initialized: false,
   availableEntries: [],
@@ -341,6 +350,7 @@ async function handleAdminLogin() {
     setExportToolsVisibility(true);
     exportAccessKeyInput.value = "";
     await loadAdminEntries();
+    await loadPrizeConfigurations();
     resultText.textContent = "Admin login successful. You can now download registrations.";
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
@@ -400,34 +410,100 @@ function applyEntriesUpdate(newEntries) {
 function renderAdminEntries(adminEntries) {
   adminEntriesList.innerHTML = "";
 
-  if (adminEntries.length === 0) {
+  const searchTerm = (prizeSearchInput?.value || "").toLowerCase().trim();
+  const sortMode = prizeSortSelect?.value || "default";
+  
+  // Filter entries based on search term
+  const filteredEntries = searchTerm 
+    ? adminEntries.filter(entry => entry.toLowerCase().includes(searchTerm))
+    : adminEntries;
+  const sortedEntries = [...filteredEntries];
+  if (sortMode === "forever-first") {
+    sortedEntries.sort((a, b) => Number(isForeverPrize(b)) - Number(isForeverPrize(a)) || a.localeCompare(b));
+  } else if (sortMode === "removable-first") {
+    sortedEntries.sort((a, b) => Number(isForeverPrize(a)) - Number(isForeverPrize(b)) || a.localeCompare(b));
+  } else if (sortMode === "name-asc") {
+    sortedEntries.sort((a, b) => a.localeCompare(b));
+  }
+
+  if (sortedEntries.length === 0) {
     const emptyItem = document.createElement("li");
     emptyItem.className = "admin-entries-item";
-    emptyItem.innerHTML = "<span class=\"admin-entries-item__label\">No wheel entries configured.</span>";
+    emptyItem.innerHTML = searchTerm 
+      ? `<span class="admin-entries-item__label">No prizes match "${searchTerm}"</span>`
+      : "<span class=\"admin-entries-item__label\">No wheel entries configured.</span>";
     adminEntriesList.appendChild(emptyItem);
     return;
   }
 
   const fragment = document.createDocumentFragment();
 
-  adminEntries.forEach((entry, index) => {
-    const item = document.createElement("li");
-    item.className = "admin-entries-item";
+  sortedEntries.forEach((entry) => {
+   const item = document.createElement("li");
+   item.className = "admin-entries-item";
 
-    const label = document.createElement("span");
-    label.className = "admin-entries-item__label";
-    label.textContent = entry;
+   const label = document.createElement("span");
+   label.className = "admin-entries-item__label";
+   label.textContent = entry;
 
-    const removeButton = document.createElement("button");
-    removeButton.className = "admin-entries-item__remove";
-    removeButton.type = "button";
-    removeButton.textContent = "Remove";
-    removeButton.addEventListener("click", () => {
-      void removeAdminEntry(index);
-    });
+   const normalized = normalizeLabel(entry);
+   const config = prizeConfigurations[normalized] || { maxWins: 1, currentWins: 0, isEternal: false };
+    
+   const configDiv = document.createElement("div");
+   configDiv.className = "admin-entries-item__config";
+    
+   const maxWinsLabel = document.createElement("label");
+   maxWinsLabel.className = "admin-entries-item__wins-label";
+   maxWinsLabel.textContent = "Can be won:";
+    
+   const maxWinsSelect = document.createElement("select");
+   maxWinsSelect.className = "admin-entries-item__wins-select";
+   for (let i = 1; i <= 5; i++) {
+     const option = document.createElement("option");
+     option.value = i;
+     option.textContent = i === 1 ? "1 time (removed)" : `${i} times`;
+     if (config.maxWins === i) {
+       option.selected = true;
+     }
+     maxWinsSelect.appendChild(option);
+   }
+    
+   const eternalCheckbox = document.createElement("input");
+   eternalCheckbox.type = "checkbox";
+   eternalCheckbox.className = "admin-entries-item__eternal-checkbox";
+   eternalCheckbox.checked = config.isEternal || false;
+   eternalCheckbox.addEventListener("change", () => {
+     const maxWins = parseInt(maxWinsSelect.value, 10);
+     const isEternal = eternalCheckbox.checked;
+     void updatePrizeConfiguration(entry, maxWins, isEternal);
+   });
+    
+   maxWinsSelect.addEventListener("change", () => {
+     const maxWins = parseInt(maxWinsSelect.value, 10);
+     const isEternal = eternalCheckbox.checked;
+     void updatePrizeConfiguration(entry, maxWins, isEternal);
+   });
+    
+   configDiv.append(maxWinsLabel, maxWinsSelect);
+    
+   const winCountSpan = document.createElement("span");
+   winCountSpan.className = "admin-entries-item__win-count";
+   winCountSpan.textContent = `(Won ${config.currentWins}/${config.maxWins})`;
+    
+   const eternalContainer = document.createElement("div");
+   eternalContainer.className = "admin-entries-item__eternal-container";
+   eternalContainer.appendChild(eternalCheckbox);
 
-    item.append(label, removeButton);
-    fragment.appendChild(item);
+   const removeButton = document.createElement("button");
+   removeButton.className = "admin-entries-item__remove";
+   removeButton.type = "button";
+   removeButton.textContent = "Remove";
+   removeButton.addEventListener("click", () => {
+     void removeAdminEntry(adminEntries.indexOf(entry));
+   });
+
+   item.append(eternalContainer, label, configDiv, winCountSpan, removeButton);
+   fragment.appendChild(item);
   });
 
   adminEntriesList.appendChild(fragment);
@@ -529,6 +605,136 @@ async function removeAdminEntry(index) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
     resultText.textContent = `Could not remove wheel entry (${message}).`;
+  }
+}
+
+async function loadPrizeConfigurations() {
+  const headers = getAdminRequestHeaders();
+  const apiUrl = headers ? adminPrizeConfigApiUrl : publicPrizeConfigApiUrl;
+  const requestHeaders = headers ? { headers } : {};
+  try {
+   const response = await fetch(apiUrl, {
+    cache: "no-store",
+    ...requestHeaders,
+   });
+   if (!response.ok) {
+     const payload = await response.json().catch(() => ({}));
+     throw new Error(payload.error || `Request failed (${response.status})`);
+   }
+
+   const payload = await response.json();
+   prizeConfigurations = {};
+   if (Array.isArray(payload.prizeConfigs)) {
+     payload.prizeConfigs.forEach((config) => {
+       prizeConfigurations[normalizeLabel(config.prizeName)] = {
+         maxWins: config.maxWins || 1,
+         currentWins: config.currentWins || 0,
+         isEternal: config.isEternal || false,
+       };
+     });
+   }
+   initializeEntriesFromState();
+   drawWheel(currentRotation);
+   updateSpinAvailability();
+  } catch (error) {
+   const message = error instanceof Error ? error.message : "Unknown error";
+   console.warn(`Could not load prize configurations (${message}).`);
+  }
+}
+
+async function updatePrizeConfiguration(prizeName, maxWins, isEternal) {
+  const headers = getAdminRequestHeaders();
+  if (!headers) {
+   resultText.textContent = "Admin login is required before managing prize configuration.";
+   return;
+  }
+
+  try {
+   const response = await fetch(adminPrizeConfigApiUrl, {
+     method: "POST",
+     cache: "no-store",
+     headers: { ...headers, "Content-Type": "application/json" },
+     body: JSON.stringify({ prizeName, maxWins, isEternal: isEternal || false }),
+   });
+
+   if (!response.ok) {
+     const payload = await response.json().catch(() => ({}));
+     throw new Error(payload.error || `Request failed (${response.status})`);
+   }
+
+   await loadPrizeConfigurations();
+   const eternalText = isEternal ? " and stays forever" : "";
+   resultText.textContent = `Updated ${prizeName} to be won up to ${maxWins} time(s)${eternalText}.`;
+  } catch (error) {
+   const message = error instanceof Error ? error.message : "Unknown error";
+   resultText.textContent = `Could not update prize configuration (${message}).`;
+  }
+}
+
+async function recordPrizeWin(prizeName) {
+  const headers = getAdminRequestHeaders();
+  if (!headers) {
+   return;
+  }
+
+  try {
+   const response = await fetch(adminPrizeWinApiUrl, {
+     method: "POST",
+     cache: "no-store",
+     headers: { ...headers, "Content-Type": "application/json" },
+     body: JSON.stringify({ prizeName }),
+   });
+
+   if (!response.ok) {
+     throw new Error(`Failed to record prize win (${response.status})`);
+   }
+
+   await loadPrizeConfigurations();
+  } catch (error) {
+   console.warn(`Could not record prize win (${String(error)})`);
+  }
+}
+
+async function recordSpinResult(result) {
+  try {
+    const response = await fetch(spinResultsApiUrl, {
+      method: "POST",
+      cache: "no-store",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(result),
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to record spin result (${response.status})`);
+    }
+  } catch (error) {
+    console.warn(`Could not record spin result (${String(error)})`);
+  }
+}
+
+async function resetPrizeWinCounts() {
+  const headers = getAdminRequestHeaders();
+  if (!headers) {
+   resultText.textContent = "Admin login is required before resetting.";
+   return;
+  }
+
+  try {
+   const response = await fetch(adminResetPrizeWinsApiUrl, {
+     method: "POST",
+     cache: "no-store",
+     headers,
+   });
+
+   if (!response.ok) {
+     const payload = await response.json().catch(() => ({}));
+     throw new Error(payload.error || `Request failed (${response.status})`);
+   }
+
+   await loadPrizeConfigurations();
+   resultText.textContent = "All prize win counts have been reset.";
+  } catch (error) {
+   const message = error instanceof Error ? error.message : "Unknown error";
+   resultText.textContent = `Could not reset prize win counts (${message}).`;
   }
 }
 
@@ -801,6 +1007,9 @@ function openPlayerForm() {
   }
 
   stopIdleSpin();
+  if (playerFormError) {
+    playerFormError.textContent = "";
+  }
   playerModal.classList.add("is-visible");
   playerModal.setAttribute("aria-hidden", "false");
   nameInput.focus();
@@ -813,6 +1022,9 @@ function closePlayerForm() {
 
 function handleFormExit() {
   playerForm.reset();
+  if (playerFormError) {
+    playerFormError.textContent = "";
+  }
   closePlayerForm();
   setWaitingForPlayer();
   drawWheel(currentRotation);
@@ -908,7 +1120,51 @@ function getWinningEntry() {
 }
 
 function isRemovablePrize(prize) {
-  return !nonRemovablePrizes.has(normalizeLabel(prize));
+  const normalized = normalizeLabel(prize);
+  
+  // If it's in the non-removable list, never remove it
+  if (nonRemovablePrizes.has(normalized)) {
+    return false;
+  }
+  
+  // Check prize configuration - only remove if it has reached max wins and is not eternal
+  const config = prizeConfigurations[normalized];
+  if (config) {
+    // If marked as eternal, never remove
+    if (config.isEternal) {
+      return false;
+    }
+    // Remove on the final allowed win (e.g. on 2nd of 2, 5th of 5)
+    if (config.currentWins + 1 < config.maxWins) {
+      return false;
+    }
+  }
+  
+  return true;
+}
+
+function isForeverPrize(prize) {
+  const normalized = normalizeLabel(prize);
+  if (nonRemovablePrizes.has(normalized)) {
+    return true;
+  }
+
+  const config = prizeConfigurations[normalized];
+  return Boolean(config?.isEternal);
+}
+
+function hasReachedConfiguredLimit(prize) {
+  const normalized = normalizeLabel(prize);
+  if (nonRemovablePrizes.has(normalized)) {
+    return false;
+  }
+
+  const config = prizeConfigurations[normalized];
+  if (!config || config.isEternal) {
+    return false;
+  }
+
+  return config.currentWins >= config.maxWins;
 }
 
 function removeEntryOnce(target) {
@@ -924,13 +1180,24 @@ function removeEntryOnce(target) {
 function completeTurn(winner) {
   const removable = isRemovablePrize(winner);
   const playerSnapshot = activePlayer;
-  const isFreeSpin = getLoseKey(winner) === "free spin";
+  const loseKey = getLoseKey(winner);
+  const isFreeSpin = loseKey === "free spin";
+  const outcomeType = isFreeSpin ? "free-spin" : (loseKey ? "loss" : "win");
+  const wonAt = new Date().toISOString();
 
   state.wins.push({
    id: createId(),
-   wonAt: new Date().toISOString(),
+   wonAt,
    winner,
    removedFromWheel: removable,
+   player: playerSnapshot,
+  });
+  void recordSpinResult({
+   id: createId(),
+   winner,
+   outcomeType,
+   removedFromWheel: removable,
+   spunAt: wonAt,
    player: playerSnapshot,
   });
   state.pendingTurn = {
@@ -958,6 +1225,10 @@ function finalizePendingTurn() {
   const pendingTurn = state.pendingTurn;
   if (!pendingTurn) {
    return;
+  }
+
+  if (!getLoseKey(pendingTurn.winner)) {
+    void recordPrizeWin(pendingTurn.winner);
   }
 
   if (pendingTurn.removable) {
@@ -1078,9 +1349,12 @@ async function loadJsonEntries() {
 function initializeEntriesFromState() {
   const sourceEntries = normalizeEntries(allEntries, true);
   const availableEntries = normalizeEntries(state.availableEntries, true);
-  entries = state.initialized
-    ? reconcileAvailableEntries(availableEntries, sourceEntries)
-    : [...sourceEntries];
+  const hasConfigState = Object.keys(prizeConfigurations).length > 0;
+  entries = hasConfigState
+    ? sourceEntries.filter((entry) => !hasReachedConfiguredLimit(entry))
+    : (state.initialized
+      ? reconcileAvailableEntries(availableEntries, sourceEntries)
+      : [...sourceEntries]);
   state.initialized = true;
   state.availableEntries = [...entries];
   state.currentRotation = typeof state.currentRotation === "number" ? state.currentRotation : 0;
@@ -1103,6 +1377,9 @@ function restorePendingTurn() {
 
 async function handlePlayerSubmit(event) {
   event.preventDefault();
+  if (playerFormError) {
+    playerFormError.textContent = "";
+  }
 
   if (!playerForm.reportValidity()) {
     return;
@@ -1132,12 +1409,25 @@ async function handlePlayerSubmit(event) {
 
     currentPlayerText.textContent = `Player: ${activePlayer.name} (${activePlayer.school})`;
     resultText.textContent = "Press spin to choose a winner.";
+    if (playerFormError) {
+      playerFormError.textContent = "";
+    }
     playerForm.reset();
     closePlayerForm();
     hideWaitingForPlayer();
     updateSpinAvailability();
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
+    if (/already played today/i.test(message)) {
+      if (playerFormError) {
+        playerFormError.textContent = "You’ve already had your spin for today.";
+      }
+      resultText.textContent = "You’ve already had your spin for today.";
+      return;
+    }
+    if (playerFormError) {
+      playerFormError.textContent = `Could not save registration (${message}).`;
+    }
     resultText.textContent = `Could not save registration (${message}).`;
   }
 }
@@ -1190,6 +1480,39 @@ adminEntryInput.addEventListener("keydown", (event) => {
     void addAdminEntry();
   }
 });
+resetPrizeWinsButton?.addEventListener("click", () => {
+  void resetPrizeWinCounts();
+});
+
+prizeSearchInput?.addEventListener("input", () => {
+  const adminEntries = allEntries;
+  renderAdminEntries(adminEntries);
+});
+
+prizeSortSelect?.addEventListener("change", () => {
+  const adminEntries = allEntries;
+  renderAdminEntries(adminEntries);
+});
+
+// Tab switching functionality
+document.querySelectorAll(".admin-tab-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const tabName = btn.getAttribute("data-tab");
+    
+    // Update active button
+    document.querySelectorAll(".admin-tab-btn").forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    
+    // Update active content
+    document.querySelectorAll(".admin-tab-content").forEach((content) => {
+      content.classList.remove("active");
+    });
+    const tabContent = document.getElementById(`${tabName}-tab`);
+    if (tabContent) {
+      tabContent.classList.add("active");
+    }
+  });
+});
 
 async function init() {
   setExportToolsVisibility(false);
@@ -1197,6 +1520,7 @@ async function init() {
   loadState();
   await loadParticipantsFromServer();
   await loadJsonEntries();
+  await loadPrizeConfigurations();
   initializeEntriesFromState();
   if (!restorePendingTurn()) {
     drawWheel(currentRotation);

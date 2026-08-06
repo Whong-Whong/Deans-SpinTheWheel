@@ -17,7 +17,7 @@
   </div>
 
   <div id="playerModal" class="modal" aria-hidden="true">
-    <section class="modal-card" aria-label="Player details form">
+    <section class="modal-card player-modal-card" aria-label="Player details form">
       <button id="closeFormButton" type="button" class="form-exit-button" aria-label="Close form">×</button>
       <h2>Enter your details</h2>
       <form id="playerForm" class="player-form">
@@ -29,6 +29,7 @@
 
         <label for="emailInput">Email</label>
         <input id="emailInput" name="email" type="email" required />
+        <p id="playerFormError" class="player-form-error" aria-live="polite"></p>
 
         <button type="submit">Continue to Wheel</button>
       </form>
@@ -36,44 +37,90 @@
   </div>
 
   <div id="adminModal" class="modal" aria-hidden="true">
-    <section class="modal-card" aria-label="Admin access">
+    <section class="modal-card admin-modal-card" aria-label="Admin access">
       <button id="closeAdminModalButton" type="button" class="form-exit-button" aria-label="Close admin access">×</button>
-      <section id="exportLoginTools" class="export-tools" aria-label="Admin login for downloads">
-        <h2 class="export-tools__title">Admin login</h2>
-        <div class="export-admin">
-          <label class="export-date-group" for="exportAdminEmail">
-            <span>Admin email</span>
+      
+      <section id="exportLoginTools" class="admin-section" aria-label="Admin login">
+        <div>
+          <h2>Admin Login</h2>
+          <p style="margin: 8px 0 20px; color: #64748b; font-size: 0.9rem;">Enter your credentials to access admin tools</p>
+        </div>
+        <div class="admin-login-form">
+          <label for="exportAdminEmail">
+            <span>Email</span>
             <input id="exportAdminEmail" type="email" value="katapills@gmail.com" />
           </label>
-          <label class="export-date-group" for="exportAccessKey">
-            <span>Access key</span>
+          <label for="exportAccessKey">
+            <span>Access Key</span>
             <input id="exportAccessKey" type="password" autocomplete="off" />
           </label>
         </div>
-        <button id="adminLoginButton" type="button">Login</button>
+        <button id="adminLoginButton" type="button" class="admin-button">Login</button>
       </section>
-      <section id="exportTools" class="export-tools" aria-label="Download registrations" hidden>
-        <h2 class="export-tools__title">Download registrations</h2>
-        <div class="export-date-range">
-          <label class="export-date-group" for="exportFromDate">
-            <span>From</span>
-            <input id="exportFromDate" type="date" />
-          </label>
-          <label class="export-date-group" for="exportToDate">
-            <span>To</span>
-            <input id="exportToDate" type="date" />
-          </label>
+
+      <section id="exportTools" class="admin-tools" aria-label="Admin tools" hidden>
+        <div class="admin-tabs">
+          <button class="admin-tab-btn active" data-tab="prizes">Prize Settings</button>
+          <button class="admin-tab-btn" data-tab="export">Download Data</button>
         </div>
-        <button id="downloadExportButton" type="button">Download Excel</button>
-        <h2 class="export-tools__title">Manage wheel entries</h2>
-        <div class="export-entry-editor">
-          <label class="export-date-group" for="adminEntryInput">
-            <span>New entry label</span>
-            <input id="adminEntryInput" type="text" placeholder="e.g. Russell Hobbs Hamper" />
-          </label>
-          <button id="addAdminEntryButton" type="button">Add entry</button>
+
+        <!-- Prize Settings Tab -->
+        <div id="prizes-tab" class="admin-tab-content active">
+          <div>
+            <h3>Manage Prizes</h3>
+            <p style="margin: 4px 0 20px; color: #64748b; font-size: 0.9rem;">Set how many times each prize can be won</p>
+          </div>
+          
+          <div style="display: grid; gap: 16px; margin-bottom: 16px;">
+            <div class="prize-add-form">
+              <input id="adminEntryInput" type="text" placeholder="Add new prize (e.g. Russell Hobbs Hamper)" />
+              <button id="addAdminEntryButton" type="button">+ Add</button>
+            </div>
+
+            <div class="prize-search-form">
+              <input id="prizeSearchInput" type="text" placeholder="🔍 Search prizes..." />
+              <select id="prizeSortSelect" aria-label="Sort prizes">
+                <option value="default">Sort: Default</option>
+                <option value="forever-first">Sort: Forever first</option>
+                <option value="removable-first">Sort: Removable first</option>
+                <option value="name-asc">Sort: Name A-Z</option>
+              </select>
+            </div>
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 0; flex: 1; min-height: 0;">
+            <div style="display: grid; grid-template-columns: 72px minmax(280px, 2.4fr) minmax(155px, 1.2fr) minmax(120px, 1fr) auto; gap: 14px; padding: 12px 16px; background: #f1f5f9; border-radius: 8px 8px 0 0; margin-bottom: 0;">
+              <div style="font-size: 0.75rem; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.3px;">Forever</div>
+              <div style="font-size: 0.75rem; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.3px;">Prize Name</div>
+              <div style="font-size: 0.75rem; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.3px;">Max Wins</div>
+              <div style="font-size: 0.75rem; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.3px;">Times Won</div>
+              <div style="font-size: 0.75rem; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.3px;"></div>
+            </div>
+            <ul id="adminEntriesList" class="admin-entries-list"></ul>
+          </div>
+
+          <button id="resetPrizeWinsButton" type="button" class="secondary-button">↻ Reset Win Counts</button>
         </div>
-        <ul id="adminEntriesList" class="admin-entries-list"></ul>
+
+        <!-- Export Tab -->
+        <div id="export-tab" class="admin-tab-content">
+          <div>
+            <h3>Download Registrations</h3>
+            <p style="margin: 4px 0 16px; color: #64748b; font-size: 0.9rem;">Export participant data to Excel</p>
+          </div>
+          
+          <div class="date-range-form">
+            <label>
+              <span>From</span>
+              <input id="exportFromDate" type="date" />
+            </label>
+            <label>
+              <span>To</span>
+              <input id="exportToDate" type="date" />
+            </label>
+          </div>
+          <button id="downloadExportButton" type="button">⬇ Download Excel</button>
+        </div>
       </section>
     </section>
   </div>

@@ -20,6 +20,7 @@ const staticDir = existsSync(distDir) ? distDir : currentDir;
 const mongoUri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017';
 const databaseName = process.env.MONGODB_DB || 'SpinTheWheel';
 const collectionName = process.env.MONGODB_COLLECTION || 'spin_the_wheel_entries';
+const spinResultsCollectionName = process.env.MONGODB_SPIN_RESULTS_COLLECTION || 'spin_wheel_results';
 const entriesConfigCollectionName = process.env.MONGODB_ENTRIES_COLLECTION || 'spin_the_wheel_config';
 const entriesConfigDocumentId = 'wheel_entries';
 const exportAdminEmail = String(process.env.EXPORT_ADMIN_EMAIL || 'katapills@gmail.com').trim().toLowerCase();
@@ -45,6 +46,17 @@ async function connectToMongo() {
       mongoDatabase = mongoClient.db(databaseName);
       participantsCollection = mongoDatabase.collection(collectionName);
       await participantsCollection.createIndex({ submittedAt: 1 });
+      await participantsCollection.createIndex({ emailNormalized: 1, submittedAt: 1 });
+      await participantsCollection.createIndex(
+        { playDate: 1, emailNormalized: 1 },
+        {
+          unique: true,
+          partialFilterExpression: {
+            playDate: { $exists: true },
+            emailNormalized: { $exists: true },
+          },
+        },
+      );
       return participantsCollection;
     })().catch((error) => {
       mongoConnectPromise = null;
@@ -58,6 +70,14 @@ async function connectToMongo() {
 async function connectToDatabase() {
   await connectToMongo();
   return mongoDatabase;
+}
+
+async function getSpinResultsCollection() {
+  const database = await connectToDatabase();
+  const collection = database.collection(spinResultsCollectionName);
+  await collection.createIndex({ spunAt: 1 });
+  await collection.createIndex({ winner: 1, spunAt: -1 });
+  return collection;
 }
 
 function normalizeParticipant(participant) {
@@ -95,6 +115,63 @@ function parseDateOnly(value) {
   }
 
   return date;
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function getLocalDayWindow(date = new Date()) {
+  const start = new Date(date);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+  return {
+    startIso: start.toISOString(),
+    endIso: end.toISOString(),
+  };
+}
+
+function getLocalDayKey(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function normalizeSpinResult(payload) {
+  if (!payload || typeof payload !== 'object') {
+    return null;
+  }
+
+  const winner = String(payload.winner || '').trim();
+  if (!winner) {
+    return null;
+  }
+
+  const outcomeType = String(payload.outcomeType || 'win').trim().toLowerCase();
+  const allowedOutcomeTypes = new Set(['win', 'loss', 'free-spin']);
+  const normalizedOutcomeType = allowedOutcomeTypes.has(outcomeType) ? outcomeType : 'win';
+  const player = payload.player && typeof payload.player === 'object' ? payload.player : {};
+  const fullName = String(player.fullName || player.name || '').trim();
+  const school = String(player.school || '').trim();
+  const email = String(player.email || '').trim();
+  const spunAtValue = String(payload.spunAt || '').trim();
+  const spunAt = spunAtValue || new Date().toISOString();
+  const spunAtDate = new Date(spunAt);
+
+  return {
+    id: String(payload.id || randomUUID()),
+    winner,
+    outcomeType: normalizedOutcomeType,
+    removedFromWheel: Boolean(payload.removedFromWheel),
+    player: {
+      fullName,
+      school,
+      email,
+    },
+    spunAt: Number.isNaN(spunAtDate.getTime()) ? new Date().toISOString() : spunAtDate.toISOString(),
+  };
 }
 
 function isAuthorizedExportRequest(req) {
@@ -195,6 +272,74 @@ async function saveConfiguredEntries(entries) {
   );
 
   return normalizedEntries;
+}
+
+async function getPrizeConfigCollection() {
+  const database = await connectToDatabase();
+  return database.collection('prize_config');
+}
+
+async function getPrizeConfigurations() {
+  const collection = await getPrizeConfigCollection();
+  const configs = await collection.find({}).toArray();
+  return configs.map((config) => ({
+    prizeName: config.prizeName,
+    maxWins: config.maxWins || 1,
+    currentWins: config.currentWins || 0,
+    isEternal: config.isEternal || false,
+  }));
+}
+
+async function getPrizeConfig(prizeName) {
+  const collection = await getPrizeConfigCollection();
+  const config = await collection.findOne({ prizeName });
+  if (!config) {
+    return { prizeName, maxWins: 1, currentWins: 0, isEternal: false };
+  }
+  return {
+    prizeName: config.prizeName,
+    maxWins: config.maxWins || 1,
+    currentWins: config.currentWins || 0,
+    isEternal: config.isEternal || false,
+  };
+}
+
+async function updatePrizeConfig(prizeName, maxWins, isEternal) {
+  const collection = await getPrizeConfigCollection();
+  const result = await collection.updateOne(
+    { prizeName },
+    {
+      $set: {
+        maxWins,
+        isEternal: isEternal || false,
+        updatedAt: new Date().toISOString(),
+      },
+      $setOnInsert: {
+        currentWins: 0,
+      },
+    },
+    { upsert: true },
+  );
+  return result;
+}
+
+async function incrementPrizeWinCount(prizeName) {
+  const collection = await getPrizeConfigCollection();
+  const result = await collection.updateOne(
+    { prizeName },
+    {
+      $inc: { currentWins: 1 },
+      $set: { updatedAt: new Date().toISOString() },
+      $setOnInsert: { maxWins: 1 },
+    },
+    { upsert: true },
+  );
+  return result;
+}
+
+async function resetPrizeWinCounts() {
+  const collection = await getPrizeConfigCollection();
+  await collection.updateMany({}, { $set: { currentWins: 0 } });
 }
 
 app.use(express.json());
@@ -328,6 +473,135 @@ app.delete('/api/admin/entries', async (req, res) => {
   }
 });
 
+app.get('/api/admin/prize-config', async (req, res) => {
+  const auth = isAuthorizedExportRequest(req);
+  if (!auth.ok) {
+    res.status(auth.status).json({ error: auth.error });
+    return;
+  }
+
+  try {
+    const prizeConfigs = await getPrizeConfigurations();
+    res.json({ prizeConfigs });
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : 'Unable to load prize configuration',
+    });
+  }
+});
+
+app.get('/api/prize-config', async (_req, res) => {
+  try {
+    const prizeConfigs = await getPrizeConfigurations();
+    res.json({ prizeConfigs });
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : 'Unable to load prize configuration',
+    });
+  }
+});
+
+app.post('/api/admin/prize-config', async (req, res) => {
+  const auth = isAuthorizedExportRequest(req);
+  if (!auth.ok) {
+    res.status(auth.status).json({ error: auth.error });
+    return;
+  }
+
+  const { prizeName, maxWins, isEternal } = req.body || {};
+  if (!prizeName || typeof maxWins !== 'number' || maxWins < 1) {
+    res.status(400).json({ error: 'Prize name and valid maxWins (≥1) are required.' });
+    return;
+  }
+
+  try {
+    await updatePrizeConfig(prizeName, maxWins, isEternal);
+    const config = await getPrizeConfig(prizeName);
+    res.json({ config });
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : 'Unable to update prize configuration',
+    });
+  }
+});
+
+app.post('/api/admin/prize-win', async (req, res) => {
+  const auth = isAuthorizedExportRequest(req);
+  if (!auth.ok) {
+    res.status(auth.status).json({ error: auth.error });
+    return;
+  }
+
+  const { prizeName } = req.body || {};
+  if (!prizeName) {
+    res.status(400).json({ error: 'Prize name is required.' });
+    return;
+  }
+
+  try {
+    await incrementPrizeWinCount(prizeName);
+    const config = await getPrizeConfig(prizeName);
+    res.json({ config });
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : 'Unable to record prize win',
+    });
+  }
+});
+
+app.post('/api/admin/reset-prize-wins', async (req, res) => {
+  const auth = isAuthorizedExportRequest(req);
+  if (!auth.ok) {
+    res.status(auth.status).json({ error: auth.error });
+    return;
+  }
+
+  try {
+    await resetPrizeWinCounts();
+    res.json({ status: 'ok', message: 'All prize win counts have been reset.' });
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : 'Unable to reset prize wins',
+    });
+  }
+});
+
+app.post('/api/winners', async (req, res) => {
+  const spinResult = normalizeSpinResult(req.body);
+  if (!spinResult) {
+    res.status(400).json({ error: 'Valid spin result payload is required.' });
+    return;
+  }
+
+  try {
+    const collection = await getSpinResultsCollection();
+    await collection.insertOne(spinResult);
+    res.status(201).json({ status: 'ok' });
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : 'Unable to save spin result',
+    });
+  }
+});
+
+app.get('/api/admin/winners', async (req, res) => {
+  const auth = isAuthorizedExportRequest(req);
+  if (!auth.ok) {
+    res.status(auth.status).json({ error: auth.error });
+    return;
+  }
+
+  try {
+    const collection = await getSpinResultsCollection();
+    const results = await collection.find({}).sort({ _id: -1 }).limit(500).toArray();
+    res.json({ results });
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : 'Unable to load spin results',
+    });
+  }
+});
+
 app.get('/api/participants/export', async (req, res) => {
   const auth = isAuthorizedExportRequest(req);
   if (!auth.ok) {
@@ -352,9 +626,11 @@ app.get('/api/participants/export', async (req, res) => {
 
   try {
     const collection = await connectToMongo();
+    const spinResultsCollection = await getSpinResultsCollection();
     const registrations = (await collection.find({}).sort({ _id: 1 }).toArray())
       .map(normalizeParticipant)
       .filter(Boolean);
+    const spinResults = await spinResultsCollection.find({}).sort({ _id: 1 }).toArray();
 
     const toDateExclusive = new Date(toDate.getTime() + (24 * 60 * 60 * 1000));
     const filteredRegistrations = registrations.filter((participant) => {
@@ -372,10 +648,29 @@ app.get('/api/participants/export', async (req, res) => {
       Email: participant.email,
       'Registered At': participant.submittedAt,
     }));
+    const filteredSpinResults = spinResults.filter((result) => {
+      const spunAt = new Date(result.spunAt);
+      if (Number.isNaN(spunAt.getTime())) {
+        return false;
+      }
+
+      return spunAt >= fromDate && spunAt < toDateExclusive;
+    });
+    const spinResultRows = filteredSpinResults.map((result) => ({
+      'Full Name': result.player?.fullName || '',
+      School: result.player?.school || '',
+      Email: result.player?.email || '',
+      Result: result.winner || '',
+      'Outcome Type': result.outcomeType || 'win',
+      'Removed From Wheel': result.removedFromWheel ? 'Yes' : 'No',
+      'Spun At': result.spunAt || '',
+    }));
 
     const worksheet = XLSX.utils.json_to_sheet(rows);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Registrations');
+    const spinWorksheet = XLSX.utils.json_to_sheet(spinResultRows);
+    XLSX.utils.book_append_sheet(workbook, spinWorksheet, 'Spin Results');
     const output = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
     const filename = `spin-wheel-registrations-${from}-to-${to}.xlsx`;
 
@@ -392,26 +687,48 @@ app.get('/api/participants/export', async (req, res) => {
 app.post('/api/participants', async (req, res) => {
   const { fullName, name, school, email } = req.body || {};
   const resolvedFullName = String(fullName || name || '').trim();
+  const resolvedSchool = String(school || '').trim();
+  const resolvedEmail = String(email || '').trim();
+  const normalizedEmail = resolvedEmail.toLowerCase();
 
-  if (!resolvedFullName || !school || !email) {
+  if (!resolvedFullName || !resolvedSchool || !resolvedEmail) {
     res.status(400).json({ error: 'Full name, school, and email are required.' });
     return;
   }
 
   try {
     const collection = await connectToMongo();
+    const { startIso, endIso } = getLocalDayWindow();
+    const duplicateToday = await collection.findOne({
+      submittedAt: { $gte: startIso, $lt: endIso },
+      $or: [
+        { emailNormalized: normalizedEmail },
+        { email: { $regex: `^${escapeRegExp(resolvedEmail)}$`, $options: 'i' } },
+      ],
+    });
+    if (duplicateToday) {
+      res.status(409).json({ error: 'This email has already played today. Please try again tomorrow.' });
+      return;
+    }
+
     const participant = {
       id: randomUUID(),
       fullName: resolvedFullName,
       name: resolvedFullName,
-      school: String(school).trim(),
-      email: String(email).trim(),
+      school: resolvedSchool,
+      email: resolvedEmail,
+      emailNormalized: normalizedEmail,
+      playDate: getLocalDayKey(),
       submittedAt: new Date().toISOString(),
     };
 
     await collection.insertOne(participant);
-    res.status(201).json(participant);
+    res.status(201).json(normalizeParticipant(participant));
   } catch (error) {
+    if (error && typeof error === 'object' && error.code === 11000) {
+      res.status(409).json({ error: 'This email has already played today. Please try again tomorrow.' });
+      return;
+    }
     res.status(500).json({
       error: error instanceof Error ? error.message : 'Unable to save participant',
     });
