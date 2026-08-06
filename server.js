@@ -473,6 +473,37 @@ app.delete('/api/admin/entries', async (req, res) => {
   }
 });
 
+app.put('/api/admin/entries', async (req, res) => {
+  const auth = isAuthorizedExportRequest(req);
+  if (!auth.ok) {
+    res.status(auth.status).json({ error: auth.error });
+    return;
+  }
+
+  const order = req.body?.order;
+  if (!Array.isArray(order)) {
+    res.status(400).json({ error: 'Order must be an array of entries.' });
+    return;
+  }
+
+  try {
+    const entries = await getCurrentEntriesForAdmin();
+    
+    // Validate that the order contains the same entries
+    if (order.length !== entries.length || !order.every(e => entries.includes(e))) {
+      res.status(400).json({ error: 'Invalid order: entries do not match.' });
+      return;
+    }
+
+    const updatedEntries = await saveConfiguredEntries(order);
+    res.json({ entries: updatedEntries });
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : 'Unable to reorder wheel entries',
+    });
+  }
+});
+
 app.get('/api/admin/prize-config', async (req, res) => {
   const auth = isAuthorizedExportRequest(req);
   if (!auth.ok) {

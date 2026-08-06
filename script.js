@@ -92,6 +92,7 @@ let prizeAnnouncementTimeoutId = 0;
 let loseAnnouncementTimeoutId = 0;
 let exportAdminSession = null;
 let prizeConfigurations = {};
+let draggedItem = null;
 let state = {
   initialized: false,
   availableEntries: [],
@@ -154,6 +155,21 @@ function getLoseKey(value) {
   }
   if (label === "not today") {
     return "not today";
+  }
+  if (label === "uh oh") {
+    return "uh oh";
+  }
+  if (label === "maybe next time") {
+    return "maybe next time";
+  }
+  if (label === "nice try") {
+    return "nice try";
+  }
+  if (label === "404 prize not found") {
+    return "404: prize not found";
+  }
+  if (label === "close but no prize") {
+    return "close, but no prize";
   }
   return null;
 }
@@ -407,6 +423,145 @@ function applyEntriesUpdate(newEntries) {
   updateSpinAvailability();
 }
 
+function handleEntryDragStart(event) {
+  console.log("Drag start:", this.dataset.entry);
+  draggedItem = this;
+  this.classList.add("is-dragging");
+  event.dataTransfer.effectAllowed = "move";
+  event.dataTransfer.setData("text/plain", this.dataset.entry);
+}
+
+function handleEntryDragEnter(event) {
+  event.preventDefault();
+  event.dataTransfer.dropEffect = "move";
+}
+
+function handleEntryDragOver(event) {
+  console.log("Drag over:", this.dataset.entry);
+  event.preventDefault();
+  event.dataTransfer.dropEffect = "move";
+  
+  if (this !== draggedItem && draggedItem) {
+    this.classList.add("is-drag-over");
+  }
+
+  // Auto-scroll the list container
+  const listContainer = adminEntriesList;
+  const rect = this.getBoundingClientRect();
+  const containerRect = listContainer.getBoundingClientRect();
+  
+  const scrollThreshold = 50;
+  const scrollSpeed = 5;
+  
+  // Scroll down if near bottom
+  if (containerRect.bottom - rect.bottom < scrollThreshold) {
+    listContainer.scrollTop += scrollSpeed;
+  }
+  
+  // Scroll up if near top
+  if (rect.top - containerRect.top < scrollThreshold) {
+    listContainer.scrollTop -= scrollSpeed;
+  }
+}
+
+function handleEntryDragLeave(event) {
+  if (event.target === this) {
+    this.classList.remove("is-drag-over");
+  }
+}
+
+async function handleEntryDrop(event) {
+  console.log("Drop event on:", this.dataset.entry);
+  event.preventDefault();
+  event.stopPropagation();
+  
+  this.classList.remove("is-drag-over");
+  
+  if (this === draggedItem) {
+    console.log("Dropped on itself, ignoring");
+    return;
+  }
+  
+  if (!draggedItem) {
+    console.log("No dragged item, ignoring");
+    return;
+  }
+  
+  const draggedEntry = draggedItem.dataset.entry;
+  const targetEntry = this.dataset.entry;
+  
+  if (!draggedEntry || !targetEntry) {
+    console.log("Missing entry data");
+    return;
+  }
+  
+  console.log(`Reordering: ${draggedEntry} -> ${targetEntry}`);
+  
+  // Reorder the entries array
+  const currentIndex = allEntries.indexOf(draggedEntry);
+  const targetIndex = allEntries.indexOf(targetEntry);
+  
+  console.log(`Current index: ${currentIndex}, Target index: ${targetIndex}`);
+  
+  if (currentIndex !== -1 && targetIndex !== -1 && currentIndex !== targetIndex) {
+    allEntries.splice(currentIndex, 1);
+    allEntries.splice(targetIndex, 0, draggedEntry);
+    
+    console.log("New order:", allEntries);
+    
+    // Send the new order to the backend
+    const headers = getAdminRequestHeaders();
+    if (!headers) {
+      console.log("No admin headers");
+      return;
+    }
+    
+    try {
+      const response = await fetch(adminEntriesApiUrl, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          ...headers,
+        },
+        body: JSON.stringify({ order: allEntries }),
+      });
+      
+      console.log("Server response status:", response.status);
+      
+      if (response.ok) {
+        const payload = await response.json();
+        console.log("Server returned entries:", payload.entries);
+        const list = normalizeEntries(payload.entries, true);
+        applyEntriesUpdate(list);
+        renderAdminEntries(list);
+        resultText.textContent = "Wheel entries reordered.";
+      } else {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.error || `Request failed (${response.status})`);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      console.error("Drop error:", message);
+      resultText.textContent = `Could not reorder entries (${message}).`;
+      // Restore the original order
+      allEntries.splice(targetIndex, 1);
+      allEntries.splice(currentIndex, 0, draggedEntry);
+      renderAdminEntries(allEntries);
+    }
+  } else {
+    console.log("Invalid indices or same position");
+  }
+}
+
+function handleEntryDragEnd(event) {
+  console.log("🏁 Drag end");
+  draggedItem = null;
+  document.querySelectorAll(".admin-entries-item").forEach(item => {
+    item.classList.remove("is-dragging");
+    item.classList.remove("is-drag-over");
+  });
+}
+
 function renderAdminEntries(adminEntries) {
   adminEntriesList.innerHTML = "";
 
@@ -438,9 +593,13 @@ function renderAdminEntries(adminEntries) {
 
   const fragment = document.createDocumentFragment();
 
-  sortedEntries.forEach((entry) => {
+  sortedEntries.forEach((entry, displayIndex) => {
    const item = document.createElement("li");
    item.className = "admin-entries-item";
+   item.draggable = true;
+   item.dataset.entry = entry;
+   // Store the original index in allEntries for proper reordering
+   item.dataset.originalIndex = allEntries.indexOf(entry);
 
    const label = document.createElement("span");
    label.className = "admin-entries-item__label";
@@ -494,15 +653,29 @@ function renderAdminEntries(adminEntries) {
    eternalContainer.className = "admin-entries-item__eternal-container";
    eternalContainer.appendChild(eternalCheckbox);
 
+   // Create drag handle
+   const dragHandle = document.createElement("div");
+   dragHandle.className = "admin-entries-item__drag-handle";
+   dragHandle.textContent = "⋮⋮";
+   dragHandle.title = "Click and drag to reorder entries";
+
    const removeButton = document.createElement("button");
    removeButton.className = "admin-entries-item__remove";
    removeButton.type = "button";
    removeButton.textContent = "Remove";
    removeButton.addEventListener("click", () => {
-     void removeAdminEntry(adminEntries.indexOf(entry));
+     void removeAdminEntry(allEntries.indexOf(entry));
    });
 
-   item.append(eternalContainer, label, configDiv, winCountSpan, removeButton);
+   // Add drag event listeners
+   item.addEventListener("dragstart", handleEntryDragStart);
+   item.addEventListener("dragenter", handleEntryDragEnter);
+   item.addEventListener("dragover", handleEntryDragOver);
+   item.addEventListener("drop", handleEntryDrop);
+   item.addEventListener("dragend", handleEntryDragEnd);
+   item.addEventListener("dragleave", handleEntryDragLeave);
+
+   item.append(dragHandle, eternalContainer, label, configDiv, winCountSpan, removeButton);
    fragment.appendChild(item);
   });
 
@@ -842,6 +1015,21 @@ function getLoseMessage(winner) {
   }
   if (loseKey === "oops") {
     return { primary: "Oops! 😬", secondary: "Looks like luck took a quick break! 😄" };
+  }
+    if (loseKey === "uh oh") {
+    return { primary: "Uh Oh! ", secondary: "The prize escaped this time!" };
+  }
+    if (loseKey === "maybe next time") {
+    return { primary: "Maybe Next Time! ", secondary: "No prize, but you earned bragging rights for spinning!" };
+  }
+    if (loseKey === "nice try") {
+    return { primary: "Nice Try", secondary: "A+ for effort!" };
+  }
+    if (loseKey === "404: prize not found") {
+    return { primary: "404: Prize Not Found.", secondary: "The wheel is in a silly mood." };
+  }
+    if (loseKey === "close, but no prize") {
+    return { primary: "Close But No Prize!", secondary: "Luck was fashionably late." };
   }
     if (loseKey === "not today") {
     return { primary: "Not Today!", secondary: "Even the wheel needs a coffee break." };
@@ -1513,6 +1701,19 @@ document.querySelectorAll(".admin-tab-btn").forEach((btn) => {
     }
   });
 });
+
+// Add drop zone handler to the list container itself
+if (adminEntriesList) {
+  adminEntriesList.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+  });
+
+  adminEntriesList.addEventListener("drop", (event) => {
+    event.preventDefault();
+    console.log("💧 Drop on list container");
+  });
+}
 
 async function init() {
   setExportToolsVisibility(false);

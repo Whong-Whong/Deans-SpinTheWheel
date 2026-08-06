@@ -445,6 +445,46 @@ export async function handleDeleteAdminEntry(req, res) {
   }
 }
 
+export async function handleReorderAdminEntries(req, res) {
+  const auth = isAuthorizedExportRequest(req);
+  if (!auth.ok) {
+    res.status(auth.status).json({ error: auth.error });
+    return;
+  }
+
+  let body;
+
+  try {
+    body = await readJsonBody(req);
+  } catch {
+    res.status(400).json({ error: 'Request body must be valid JSON.' });
+    return;
+  }
+
+  const order = body?.order;
+  if (!Array.isArray(order)) {
+    res.status(400).json({ error: 'Order must be an array of entries.' });
+    return;
+  }
+
+  try {
+    const entries = await getCurrentEntriesForAdmin();
+     
+    // Validate that the order contains the same entries
+    if (order.length !== entries.length || !order.every(e => entries.includes(e))) {
+      res.status(400).json({ error: 'Invalid order: entries do not match.' });
+      return;
+    }
+
+    const updatedEntries = await saveConfiguredEntries(order);
+    res.status(200).json({ entries: updatedEntries });
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : 'Unable to reorder wheel entries',
+    });
+  }
+}
+
 export async function handleParticipantsExport(req, res) {
   const auth = isAuthorizedExportRequest(req);
   if (!auth.ok) {

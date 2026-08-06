@@ -791,7 +791,7 @@ h1 {
 
 .admin-entries-item {
   display: grid;
-  grid-template-columns: 72px minmax(280px, 2.4fr) minmax(155px, 1.2fr) minmax(120px, 1fr) auto;
+  grid-template-columns: 40px 40px minmax(280px, 2.4fr) minmax(155px, 1.2fr) minmax(120px, 1fr) auto;
   align-items: center;
   gap: 14px;
   padding: 14px 16px;
@@ -799,12 +799,54 @@ h1 {
   border-radius: 8px;
   background: #ffffff;
   transition: all 0.3s;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
 }
 
 .admin-entries-item:hover {
   background: #f8fafc;
   border-color: #3b82f6;
   box-shadow: 0 2px 8px rgba(59, 130, 246, 0.1);
+}
+
+.admin-entries-item.is-dragging {
+  opacity: 0.5;
+  background: #f1f5f9;
+  cursor: grabbing;
+  border-color: #8b5cf6;
+  box-shadow: 0 4px 12px rgba(139, 92, 246, 0.2);
+}
+
+.admin-entries-item.is-drag-over {
+  background: #ede9fe;
+  border: 2px solid #8b5cf6;
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 2px #8b5cf6;
+}
+
+.admin-entries-item__drag-handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.2rem;
+  font-weight: bold;
+  color: #cbd5e1;
+  cursor: grab;
+  padding: 4px 6px;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.admin-entries-item__drag-handle:hover {
+  color: #8b5cf6;
+  background: #f1f5f9;
+}
+
+.admin-entries-item:hover .admin-entries-item__drag-handle {
+  color: #8b5cf6;
 }
 
 .admin-entries-item__label {

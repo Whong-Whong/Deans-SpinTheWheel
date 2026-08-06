@@ -2,6 +2,7 @@ import {
   handleAddAdminEntry,
   handleDeleteAdminEntry,
   handleGetAdminEntries,
+  handleReorderAdminEntries,
   sendMethodNotAllowed,
 } from '../_lib/spin-wheel.js';
 
@@ -21,5 +22,10 @@ export default async function handler(req, res) {
     return;
   }
 
-  sendMethodNotAllowed(res, ['GET', 'POST', 'DELETE']);
+  if (req.method === 'PUT') {
+    await handleReorderAdminEntries(req, res);
+    return;
+  }
+
+  sendMethodNotAllowed(res, ['GET', 'POST', 'DELETE', 'PUT']);
 }
