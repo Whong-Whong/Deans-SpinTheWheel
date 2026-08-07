@@ -132,37 +132,63 @@ function closeAdminModal() {
   adminModal.setAttribute("aria-hidden", "true");
 }
 
-const milestonePrizeNames = Object.freeze({
-  stationery: "Stationery Hamper",
-  russelHobbs: "Russel Hobbs Hamper",
+const milestoneSpinSchedule = Object.freeze({
+  20: "Pilot",
+  50: "Phillips Kettle",
+  70: "Bantex",
+  100: "Fila",
+  120: "Stationery Hamper",
+  150: "Tower",
+  170: "Rexel",
+  200: "Parrot",
+  230: "Russel Hobbs Hamper",
+  270: "Stationery Hamper",
+  300: "Russel Hobbs Hamper",
 });
+const milestonePrizeNames = Object.freeze([...new Set(Object.values(milestoneSpinSchedule))]);
+const regularSpinPrizeNames = Object.freeze(["Troos Prys", "Pilot Juice Pen"]);
 
 function isMilestonePrize(prize) {
   const normalizedPrize = normalizeLabel(prize);
-  return normalizedPrize === normalizeLabel(milestonePrizeNames.stationery)
-    || normalizedPrize === normalizeLabel(milestonePrizeNames.russelHobbs);
+  return milestonePrizeNames.some((milestonePrize) => {
+    const normalizedMilestone = normalizeLabel(milestonePrize);
+    return normalizedPrize === normalizedMilestone
+      || normalizedPrize.includes(normalizedMilestone)
+      || normalizedMilestone.includes(normalizedPrize);
+  });
+}
+
+function isRegularSpinPrize(prize) {
+  const normalizedPrize = normalizeLabel(prize);
+  return regularSpinPrizeNames.some((regularPrize) => {
+    const normalizedRegular = normalizeLabel(regularPrize);
+    return normalizedPrize === normalizedRegular
+      || normalizedPrize.includes(normalizedRegular)
+      || normalizedRegular.includes(normalizedPrize);
+  });
 }
 
 function getMilestonePrizeForSpin(spinNumber) {
-  // 20, 50, 70, 100, 120, 150, 170, 200, ...
-  // Pattern repeats every 50 spins: [20→Stationery, 50→RusselHobbs]
   if (spinNumber <= 0) {
     return null;
   }
 
-  const cycle = spinNumber % 50;
-  if (cycle === 20) return milestonePrizeNames.stationery;
-  if (cycle === 0) return milestonePrizeNames.russelHobbs;
-  return null;
+  return milestoneSpinSchedule[spinNumber] || null;
 }
 
 function findEntryInWheel(targetLabel) {
   if (!targetLabel) return null;
   const normalizedTarget = normalizeLabel(targetLabel);
-  const foundIndex = entries.findIndex(
-    (entry) => normalizeLabel(entry) === normalizedTarget
-  );
-  return foundIndex >= 0 ? foundIndex : null;
+  const exactMatchIndex = entries.findIndex((entry) => normalizeLabel(entry) === normalizedTarget);
+  if (exactMatchIndex >= 0) {
+    return exactMatchIndex;
+  }
+
+  const partialMatchIndex = entries.findIndex((entry) => {
+    const normalizedEntry = normalizeLabel(entry);
+    return normalizedEntry.includes(normalizedTarget) || normalizedTarget.includes(normalizedEntry);
+  });
+  return partialMatchIndex >= 0 ? partialMatchIndex : null;
 }
 
 function getPointerAngle() {
@@ -1663,28 +1689,28 @@ async function spinWheel() {
         : Math.floor(Math.random() * entries.length);
     }
   } else {
-    // Regular spin - 90% lose, 10% standard win (excluding milestone prizes)
+    // Regular spin - losses, plus Troos Prys and Pilot Juice Pen only.
     const loseIndices = entries
       .map((entry, index) => ({ entry, index }))
       .filter(({ entry }) => getLoseKey(entry) !== null)
       .map(({ index }) => index);
-    const standardPrizeIndices = entries
+    const regularPrizeIndices = entries
       .map((entry, index) => ({ entry, index }))
-      .filter(({ entry }) => getLoseKey(entry) === null && !isMilestonePrize(entry))
+      .filter(({ entry }) => getLoseKey(entry) === null && !isMilestonePrize(entry) && isRegularSpinPrize(entry))
       .map(({ index }) => index);
     
-    if (loseIndices.length > 0 && standardPrizeIndices.length > 0) {
+    if (loseIndices.length > 0 && regularPrizeIndices.length > 0) {
       const pickLose = Math.random() < 0.9;
-      const selectedIndices = pickLose ? loseIndices : standardPrizeIndices;
+      const selectedIndices = pickLose ? loseIndices : regularPrizeIndices;
       winningIndex = selectedIndices[Math.floor(Math.random() * selectedIndices.length)];
     } else if (loseIndices.length > 0) {
       // Only lose entries available
       winningIndex = loseIndices[Math.floor(Math.random() * loseIndices.length)];
-    } else if (standardPrizeIndices.length > 0) {
-      // Only standard prizes available
-      winningIndex = standardPrizeIndices[Math.floor(Math.random() * standardPrizeIndices.length)];
+    } else if (regularPrizeIndices.length > 0) {
+      // Only regular non-milestone allowed prizes available
+      winningIndex = regularPrizeIndices[Math.floor(Math.random() * regularPrizeIndices.length)];
     } else {
-      // Only milestone prizes remain on the wheel
+      // Only milestone/other excluded prizes remain on the wheel
       winningIndex = Math.floor(Math.random() * entries.length);
     }
   }
