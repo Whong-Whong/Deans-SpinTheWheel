@@ -736,6 +736,23 @@ h1 {
   box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
 }
 
+.secondary-button.is-loading {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.secondary-button.is-loading::after {
+  content: "";
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.45);
+  border-top-color: #ffffff;
+  animation: button-spinner 0.7s linear infinite;
+}
+
 .reset-wins-button {
   padding: 11px 20px;
   font-size: 0.9rem;
@@ -753,6 +770,12 @@ h1 {
 .reset-wins-button:hover {
   background: #7c3aed;
   transform: translateY(-1px);
+}
+
+@keyframes button-spinner {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .export-date-range {

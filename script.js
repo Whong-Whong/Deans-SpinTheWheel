@@ -51,6 +51,9 @@ const adminPrizeWinApiUrl = new URL("/api/admin/prize-win", siteUrl).toString();
 const adminResetPrizeWinsApiUrl = new URL("/api/admin/reset-prize-wins", siteUrl).toString();
 const participantsApiUrl = new URL("/api/participants", siteUrl).toString();
 const spinResultsApiUrl = new URL("/api/winners", siteUrl).toString();
+const spinCounterNextApiUrl = new URL("/api/spin-counter/next", siteUrl).toString();
+const spinCounterNextFallbackApiUrl = new URL("/api/spin-counter-next", siteUrl).toString();
+const spinCounterFlatApiUrl = new URL("/api/spin-counter", siteUrl).toString();
 const participantsExportApiUrl = new URL("/api/participants/export", siteUrl).toString();
 const storageKey = "spin-wheel-state-v1";
 const nonRemovablePrizes = new Set([
@@ -60,6 +63,7 @@ const nonRemovablePrizes = new Set([
   "free spin",
   "oops",
   "not today",
+  "no prize this time",
   "troos prys",
 ]);
 
@@ -128,6 +132,55 @@ function closeAdminModal() {
   adminModal.setAttribute("aria-hidden", "true");
 }
 
+const milestonePrizeNames = Object.freeze({
+  stationery: "Stationery Hamper",
+  russelHobbs: "Russel Hobbs Hamper",
+});
+
+function isMilestonePrize(prize) {
+  const normalizedPrize = normalizeLabel(prize);
+  return normalizedPrize === normalizeLabel(milestonePrizeNames.stationery)
+    || normalizedPrize === normalizeLabel(milestonePrizeNames.russelHobbs);
+}
+
+function getMilestonePrizeForSpin(spinNumber) {
+  // 20, 50, 70, 100, 120, 150, 170, 200, ...
+  // Pattern repeats every 50 spins: [20→Stationery, 50→RusselHobbs]
+  if (spinNumber <= 0) {
+    return null;
+  }
+
+  const cycle = spinNumber % 50;
+  if (cycle === 20) return milestonePrizeNames.stationery;
+  if (cycle === 0) return milestonePrizeNames.russelHobbs;
+  return null;
+}
+
+function findEntryInWheel(targetLabel) {
+  if (!targetLabel) return null;
+  const normalizedTarget = normalizeLabel(targetLabel);
+  const foundIndex = entries.findIndex(
+    (entry) => normalizeLabel(entry) === normalizedTarget
+  );
+  return foundIndex >= 0 ? foundIndex : null;
+}
+
+function getPointerAngle() {
+  if (!pointer || !canvas) {
+    return -Math.PI / 2;
+  }
+
+  const wheelRect = canvas.getBoundingClientRect();
+  const pointerRect = pointer.getBoundingClientRect();
+  const centerX = wheelRect.left + wheelRect.width / 2;
+  const centerY = wheelRect.top + wheelRect.height / 2;
+  const tipX = pointerRect.left + pointerRect.width / 2;
+  const tipY = pointerRect.top + pointerRect.height;
+  const angle = Math.atan2(tipY - centerY, tipX - centerX);
+
+  return Number.isFinite(angle) ? angle : -Math.PI / 2;
+}
+
 function normalizeLabel(value) {
   return String(value)
     .toLowerCase()
@@ -170,6 +223,9 @@ function getLoseKey(value) {
   }
   if (label === "close but no prize") {
     return "close, but no prize";
+  }
+  if (label === "no prize this time") {
+    return "no prize this time";
   }
   return null;
 }
@@ -607,6 +663,8 @@ function renderAdminEntries(adminEntries) {
 
    const normalized = normalizeLabel(entry);
    const config = prizeConfigurations[normalized] || { maxWins: 1, currentWins: 0, isEternal: false };
+   const localPrizeWins = getLocalPrizeWinCount(entry);
+   const displayedWins = Math.max(config.currentWins || 0, localPrizeWins);
     
    const configDiv = document.createElement("div");
    configDiv.className = "admin-entries-item__config";
@@ -647,7 +705,7 @@ function renderAdminEntries(adminEntries) {
     
    const winCountSpan = document.createElement("span");
    winCountSpan.className = "admin-entries-item__win-count";
-   winCountSpan.textContent = `(Won ${config.currentWins}/${config.maxWins})`;
+   winCountSpan.textContent = `(Won ${displayedWins}/${config.maxWins})`;
     
    const eternalContainer = document.createElement("div");
    eternalContainer.className = "admin-entries-item__eternal-container";
@@ -884,11 +942,64 @@ async function recordSpinResult(result) {
   }
 }
 
+async function reserveNextSpinNumber() {
+  const candidateUrls = [
+    spinCounterNextApiUrl,
+    spinCounterNextFallbackApiUrl,
+    spinCounterFlatApiUrl,
+    "/api/spin-counter/next",
+    "/api/spin-counter-next",
+    "/api/spin-counter",
+  ];
+  let lastError = new Error("Unable to reserve spin number.");
+
+  for (const url of candidateUrls) {
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+      });
+      const responseText = await response.text();
+
+      let payload;
+      try {
+        payload = responseText ? JSON.parse(responseText) : {};
+      } catch {
+        throw new Error("Spin counter endpoint returned HTML instead of JSON.");
+      }
+
+      if (!response.ok) {
+        throw new Error(payload.error || `Failed to reserve spin number (${response.status})`);
+      }
+
+      const spinNumber = Number(payload?.spinNumber);
+      const spinDateKey = String(payload?.spinDateKey || "").trim();
+      if (!Number.isInteger(spinNumber) || spinNumber < 1 || !spinDateKey) {
+        throw new Error("Server returned an invalid spin counter payload.");
+      }
+
+      return { spinNumber, spinDateKey };
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+    }
+  }
+
+  throw lastError;
+}
+
 async function resetPrizeWinCounts() {
   const headers = getAdminRequestHeaders();
   if (!headers) {
    resultText.textContent = "Admin login is required before resetting.";
    return;
+  }
+
+  const originalButtonText = resetPrizeWinsButton?.textContent || "↻ Reset Win Counts";
+  if (resetPrizeWinsButton) {
+    resetPrizeWinsButton.disabled = true;
+    resetPrizeWinsButton.classList.add("is-loading");
+    resetPrizeWinsButton.textContent = "Resetting...";
   }
 
   try {
@@ -903,11 +1014,23 @@ async function resetPrizeWinCounts() {
      throw new Error(payload.error || `Request failed (${response.status})`);
    }
 
+   // Reset local win history used for on-device max-win enforcement.
+   state.wins = [];
+   saveState();
    await loadPrizeConfigurations();
+   initializeEntriesFromState();
+   drawWheel(currentRotation);
+   updateSpinAvailability();
    resultText.textContent = "All prize win counts have been reset.";
   } catch (error) {
    const message = error instanceof Error ? error.message : "Unknown error";
    resultText.textContent = `Could not reset prize win counts (${message}).`;
+  } finally {
+    if (resetPrizeWinsButton) {
+      resetPrizeWinsButton.disabled = false;
+      resetPrizeWinsButton.classList.remove("is-loading");
+      resetPrizeWinsButton.textContent = originalButtonText;
+    }
   }
 }
 
@@ -1031,6 +1154,12 @@ function getLoseMessage(winner) {
     if (loseKey === "close, but no prize") {
     return { primary: "Close But No Prize!", secondary: "Luck was fashionably late." };
   }
+    if (loseKey === "no prize this time") {
+    return { primary: "No Prize This Time!", secondary: "No luck this round, but your next spin could hit big." };
+  }
+    if (loseKey === "better luck next time") {
+    return { primary: "Better Luck Next Time! 🍀", secondary: "The wheel wasn't on your side this time—but don't stop smiling!" };
+  }
     if (loseKey === "not today") {
     return { primary: "Not Today!", secondary: "Even the wheel needs a coffee break." };
   }
@@ -1116,6 +1245,7 @@ function loadState() {
     }
 
     const parsed = JSON.parse(raw);
+    
     state = {
       initialized: Boolean(parsed.initialized),
       availableEntries: normalizeEntries(parsed.availableEntries, true),
@@ -1299,17 +1429,24 @@ function getWinningEntry() {
     return "";
   }
 
+  const index = getWinningIndexForRotation(currentRotation);
+  return entries[index] || "";
+}
+
+function getWinningIndexForRotation(rotation, pointerAngle = getPointerAngle()) {
+  if (entries.length === 0) {
+    return 0;
+  }
+
   const fullCircle = Math.PI * 2;
-  const pointerAngle = -Math.PI / 2;
-  const normalized = ((pointerAngle - currentRotation) % fullCircle + fullCircle) % fullCircle;
+  const normalized = ((pointerAngle - rotation) % fullCircle + fullCircle) % fullCircle;
   const arc = fullCircle / entries.length;
-  const index = Math.floor(normalized / arc) % entries.length;
-  return entries[index];
+  return Math.floor(normalized / arc) % entries.length;
 }
 
 function isRemovablePrize(prize) {
   const normalized = normalizeLabel(prize);
-  
+
   // If it's in the non-removable list, never remove it
   if (nonRemovablePrizes.has(normalized)) {
     return false;
@@ -1318,12 +1455,15 @@ function isRemovablePrize(prize) {
   // Check prize configuration - only remove if it has reached max wins and is not eternal
   const config = prizeConfigurations[normalized];
   if (config) {
+    const localPrizeWins = getLocalPrizeWinCount(prize);
+    const currentWins = Math.max(config.currentWins || 0, localPrizeWins);
+
     // If marked as eternal, never remove
     if (config.isEternal) {
       return false;
     }
     // Remove on the final allowed win (e.g. on 2nd of 2, 5th of 5)
-    if (config.currentWins + 1 < config.maxWins) {
+    if (currentWins + 1 < config.maxWins) {
       return false;
     }
   }
@@ -1352,7 +1492,25 @@ function hasReachedConfiguredLimit(prize) {
     return false;
   }
 
-  return config.currentWins >= config.maxWins;
+  const localPrizeWins = getLocalPrizeWinCount(prize);
+  const currentWins = Math.max(config.currentWins || 0, localPrizeWins);
+  return currentWins >= config.maxWins;
+}
+
+function getLocalPrizeWinCount(prize) {
+  const normalizedPrize = normalizeLabel(prize);
+  return state.wins.reduce((total, win) => {
+    if (!win || typeof win !== "object") {
+      return total;
+    }
+
+    const wonPrize = String(win.winner || "");
+    if (getLoseKey(wonPrize)) {
+      return total;
+    }
+
+    return normalizeLabel(wonPrize) === normalizedPrize ? total + 1 : total;
+  }, 0);
 }
 
 function removeEntryOnce(target) {
@@ -1365,23 +1523,29 @@ function removeEntryOnce(target) {
   return true;
 }
 
-function completeTurn(winner) {
+function completeTurn(winner, spinCounter = null) {
   const removable = isRemovablePrize(winner);
   const playerSnapshot = activePlayer;
   const loseKey = getLoseKey(winner);
   const isFreeSpin = loseKey === "free spin";
   const outcomeType = isFreeSpin ? "free-spin" : (loseKey ? "loss" : "win");
   const wonAt = new Date().toISOString();
+  const spinNumber = spinCounter?.spinNumber ?? null;
+  const spinDateKey = spinCounter?.spinDateKey ?? null;
 
   state.wins.push({
    id: createId(),
    wonAt,
+   spinNumber,
+   spinDateKey,
    winner,
    removedFromWheel: removable,
    player: playerSnapshot,
   });
   void recordSpinResult({
    id: createId(),
+   spinNumber,
+   spinDateKey,
    winner,
    outcomeType,
    removedFromWheel: removable,
@@ -1451,7 +1615,7 @@ function finalizePendingTurn() {
   updateSpinAvailability();
 }
 
-function spinWheel() {
+async function spinWheel() {
   if (isSpinning || !activePlayer || entries.length === 0) {
     return;
   }
@@ -1463,16 +1627,90 @@ function spinWheel() {
 
   const extraTurns = 5 + Math.random() * 4;
   const fullCircle = Math.PI * 2;
+  const pointerAngle = getPointerAngle();
+
+  let spinCounter;
+  try {
+    spinCounter = await reserveNextSpinNumber();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown error";
+    isSpinning = false;
+    updateSpinAvailability();
+    resultText.textContent = `Could not start spin (${message}).`;
+    return;
+  }
+
+  // Check if this spin is a milestone spin with a guaranteed prize
+  const milestonePrize = getMilestonePrizeForSpin(spinCounter.spinNumber);
+  console.log(`🎡 Spin #${spinCounter.spinNumber}${milestonePrize ? ` [MILESTONE] → ${milestonePrize}` : ''}`);
+  let winningIndex;
+  
+  if (milestonePrize) {
+    // Milestone spin - find and land on the specific prize
+    const milestoneIndex = findEntryInWheel(milestonePrize);
+    if (milestoneIndex !== null) {
+      winningIndex = milestoneIndex;
+    }
+
+    if (winningIndex === undefined) {
+      // Fallback if prize not found on wheel
+      const prizeIndices = entries
+        .map((entry, index) => ({ entry, index }))
+        .filter(({ entry }) => getLoseKey(entry) === null)
+        .map(({ index }) => index);
+      winningIndex = prizeIndices.length > 0
+        ? prizeIndices[Math.floor(Math.random() * prizeIndices.length)]
+        : Math.floor(Math.random() * entries.length);
+    }
+  } else {
+    // Regular spin - 90% lose, 10% standard win (excluding milestone prizes)
+    const loseIndices = entries
+      .map((entry, index) => ({ entry, index }))
+      .filter(({ entry }) => getLoseKey(entry) !== null)
+      .map(({ index }) => index);
+    const standardPrizeIndices = entries
+      .map((entry, index) => ({ entry, index }))
+      .filter(({ entry }) => getLoseKey(entry) === null && !isMilestonePrize(entry))
+      .map(({ index }) => index);
+    
+    if (loseIndices.length > 0 && standardPrizeIndices.length > 0) {
+      const pickLose = Math.random() < 0.9;
+      const selectedIndices = pickLose ? loseIndices : standardPrizeIndices;
+      winningIndex = selectedIndices[Math.floor(Math.random() * selectedIndices.length)];
+    } else if (loseIndices.length > 0) {
+      // Only lose entries available
+      winningIndex = loseIndices[Math.floor(Math.random() * loseIndices.length)];
+    } else if (standardPrizeIndices.length > 0) {
+      // Only standard prizes available
+      winningIndex = standardPrizeIndices[Math.floor(Math.random() * standardPrizeIndices.length)];
+    } else {
+      // Only milestone prizes remain on the wheel
+      winningIndex = Math.floor(Math.random() * entries.length);
+    }
+  }
   const arc = fullCircle / entries.length;
-  const pointerAngle = -Math.PI / 2;
-  const winningIndex = Math.floor(Math.random() * entries.length);
+  const selectedWinner = entries[winningIndex] || "";
   const start = performance.now();
   const duration = 4500;
   const startRotation = currentRotation;
   const targetAngle = ((pointerAngle - (winningIndex * arc + arc / 2)) % fullCircle + fullCircle) % fullCircle;
   const startAngle = ((startRotation % fullCircle) + fullCircle) % fullCircle;
   const deltaToTarget = (targetAngle - startAngle + fullCircle) % fullCircle;
-  const targetRotation = startRotation + deltaToTarget + (fullCircle * extraTurns);
+  const baseTargetRotation = startRotation + deltaToTarget + (fullCircle * extraTurns);
+  let targetRotation = baseTargetRotation;
+  let resolvedWinningIndex = getWinningIndexForRotation(targetRotation, pointerAngle);
+
+  if (resolvedWinningIndex !== winningIndex) {
+    for (let step = 1; step <= entries.length; step += 1) {
+      const candidateRotation = baseTargetRotation + (step * arc);
+      const candidateIndex = getWinningIndexForRotation(candidateRotation, pointerAngle);
+      if (candidateIndex === winningIndex) {
+        targetRotation = candidateRotation;
+        resolvedWinningIndex = candidateIndex;
+        break;
+      }
+    }
+  }
 
   function animate(now) {
     const elapsed = now - start;
@@ -1490,9 +1728,9 @@ function spinWheel() {
     drawWheel(currentRotation);
     state.currentRotation = currentRotation;
     saveState();
-    const winner = getWinningEntry();
+    const winner = entries[resolvedWinningIndex] || selectedWinner || getWinningEntry();
     isSpinning = false;
-    completeTurn(winner);
+    completeTurn(winner, spinCounter);
   }
 
   requestAnimationFrame(animate);

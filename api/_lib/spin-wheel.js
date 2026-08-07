@@ -12,6 +12,7 @@ const projectRoot = path.join(currentDir, '..', '..');
 const mongoUri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017';
 const databaseName = process.env.MONGODB_DB || 'SpinTheWheel';
 const collectionName = process.env.MONGODB_COLLECTION || 'spin_the_wheel_entries';
+const spinCounterCollectionName = process.env.MONGODB_SPIN_COUNTER_COLLECTION || 'spin_daily_counters';
 const entriesConfigCollectionName = process.env.MONGODB_ENTRIES_COLLECTION || 'spin_the_wheel_config';
 const entriesConfigDocumentId = 'wheel_entries';
 const exportAdminEmail = String(process.env.EXPORT_ADMIN_EMAIL || 'katapills@gmail.com').trim().toLowerCase();
@@ -89,6 +90,13 @@ export function parseDateOnly(value) {
   return date;
 }
 
+export function getLocalDayKey(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 export function normalizeEntryList(entries) {
   if (!Array.isArray(entries)) {
     return [];
@@ -125,6 +133,13 @@ export async function loadDefaultEntriesFromFile() {
 export async function getManagedEntriesCollection() {
   const database = await connectToDatabase();
   return database.collection(entriesConfigCollectionName);
+}
+
+export async function getSpinCounterCollection() {
+  const database = await connectToDatabase();
+  const collection = database.collection(spinCounterCollectionName);
+  await collection.createIndex({ dateKey: 1 }, { unique: true });
+  return collection;
 }
 
 export async function getConfiguredEntries() {
@@ -276,6 +291,36 @@ export async function handleGetParticipants(_req, res) {
   } catch (error) {
     res.status(500).json({
       error: error instanceof Error ? error.message : 'Unable to load participants',
+    });
+  }
+}
+
+export async function handleReserveNextSpinCounter(_req, res) {
+  const now = new Date();
+  const dateKey = getLocalDayKey(now);
+  const timestamp = now.toISOString();
+
+  try {
+    const collection = await getSpinCounterCollection();
+    const counter = await collection.findOneAndUpdate(
+      { dateKey },
+      {
+        $inc: { count: 1 },
+        $set: { updatedAt: timestamp },
+        $setOnInsert: { dateKey, createdAt: timestamp },
+      },
+      { upsert: true, returnDocument: 'after' },
+    );
+
+    if (!counter || !Number.isInteger(counter.count) || counter.count < 1) {
+      res.status(500).json({ error: 'Unable to reserve spin counter.' });
+      return;
+    }
+
+    res.status(200).json({ spinNumber: counter.count, spinDateKey: dateKey });
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : 'Unable to reserve spin counter',
     });
   }
 }

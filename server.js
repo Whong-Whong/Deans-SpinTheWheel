@@ -21,6 +21,7 @@ const mongoUri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017';
 const databaseName = process.env.MONGODB_DB || 'SpinTheWheel';
 const collectionName = process.env.MONGODB_COLLECTION || 'spin_the_wheel_entries';
 const spinResultsCollectionName = process.env.MONGODB_SPIN_RESULTS_COLLECTION || 'spin_wheel_results';
+const spinCounterCollectionName = process.env.MONGODB_SPIN_COUNTER_COLLECTION || 'spin_daily_counters';
 const entriesConfigCollectionName = process.env.MONGODB_ENTRIES_COLLECTION || 'spin_the_wheel_config';
 const entriesConfigDocumentId = 'wheel_entries';
 const exportAdminEmail = String(process.env.EXPORT_ADMIN_EMAIL || 'katapills@gmail.com').trim().toLowerCase();
@@ -77,6 +78,13 @@ async function getSpinResultsCollection() {
   const collection = database.collection(spinResultsCollectionName);
   await collection.createIndex({ spunAt: 1 });
   await collection.createIndex({ winner: 1, spunAt: -1 });
+  return collection;
+}
+
+async function getSpinCounterCollection() {
+  const database = await connectToDatabase();
+  const collection = database.collection(spinCounterCollectionName);
+  await collection.createIndex({ dateKey: 1 }, { unique: true });
   return collection;
 }
 
@@ -159,9 +167,14 @@ function normalizeSpinResult(payload) {
   const spunAtValue = String(payload.spunAt || '').trim();
   const spunAt = spunAtValue || new Date().toISOString();
   const spunAtDate = new Date(spunAt);
+  const spinNumberValue = Number(payload.spinNumber);
+  const spinNumber = Number.isInteger(spinNumberValue) && spinNumberValue > 0 ? spinNumberValue : null;
+  const spinDateKey = String(payload.spinDateKey || '').trim();
 
   return {
     id: String(payload.id || randomUUID()),
+    spinNumber,
+    spinDateKey: spinDateKey || null,
     winner,
     outcomeType: normalizedOutcomeType,
     removedFromWheel: Boolean(payload.removedFromWheel),
@@ -611,6 +624,96 @@ app.post('/api/winners', async (req, res) => {
   } catch (error) {
     res.status(500).json({
       error: error instanceof Error ? error.message : 'Unable to save spin result',
+    });
+  }
+});
+
+app.post('/api/spin-counter/next', async (_req, res) => {
+  const now = new Date();
+  const dateKey = getLocalDayKey(now);
+  const timestamp = now.toISOString();
+
+  try {
+    const collection = await getSpinCounterCollection();
+    const counter = await collection.findOneAndUpdate(
+      { dateKey },
+      {
+        $inc: { count: 1 },
+        $set: { updatedAt: timestamp },
+        $setOnInsert: { dateKey, createdAt: timestamp },
+      },
+      { upsert: true, returnDocument: 'after' },
+    );
+
+    if (!counter || !Number.isInteger(counter.count) || counter.count < 1) {
+      res.status(500).json({ error: 'Unable to reserve spin counter.' });
+      return;
+    }
+
+    res.status(200).json({ spinNumber: counter.count, spinDateKey: dateKey });
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : 'Unable to reserve spin counter',
+    });
+  }
+});
+
+app.post('/api/spin-counter-next', async (_req, res) => {
+  const now = new Date();
+  const dateKey = getLocalDayKey(now);
+  const timestamp = now.toISOString();
+
+  try {
+    const collection = await getSpinCounterCollection();
+    const counter = await collection.findOneAndUpdate(
+      { dateKey },
+      {
+        $inc: { count: 1 },
+        $set: { updatedAt: timestamp },
+        $setOnInsert: { dateKey, createdAt: timestamp },
+      },
+      { upsert: true, returnDocument: 'after' },
+    );
+
+    if (!counter || !Number.isInteger(counter.count) || counter.count < 1) {
+      res.status(500).json({ error: 'Unable to reserve spin counter.' });
+      return;
+    }
+
+    res.status(200).json({ spinNumber: counter.count, spinDateKey: dateKey });
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : 'Unable to reserve spin counter',
+    });
+  }
+});
+
+app.post('/api/spin-counter', async (_req, res) => {
+  const now = new Date();
+  const dateKey = getLocalDayKey(now);
+  const timestamp = now.toISOString();
+
+  try {
+    const collection = await getSpinCounterCollection();
+    const counter = await collection.findOneAndUpdate(
+      { dateKey },
+      {
+        $inc: { count: 1 },
+        $set: { updatedAt: timestamp },
+        $setOnInsert: { dateKey, createdAt: timestamp },
+      },
+      { upsert: true, returnDocument: 'after' },
+    );
+
+    if (!counter || !Number.isInteger(counter.count) || counter.count < 1) {
+      res.status(500).json({ error: 'Unable to reserve spin counter.' });
+      return;
+    }
+
+    res.status(200).json({ spinNumber: counter.count, spinDateKey: dateKey });
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : 'Unable to reserve spin counter',
     });
   }
 });
