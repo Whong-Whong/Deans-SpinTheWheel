@@ -2145,6 +2145,7 @@ async function resetPrizeWinCounts() {
    saveState();
    await loadPrizeConfigurations();
    initializeEntriesFromState();
+   renderAdminEntries(allEntries);
    drawWheel(currentRotation);
    updateSpinAvailability();
    resultText.textContent = "All prize win counts have been reset.";
