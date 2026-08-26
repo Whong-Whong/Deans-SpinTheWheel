@@ -269,6 +269,155 @@ export async function saveConfiguredEntries(entries, lossMessages, lossTypes) {
   return normalizedEntries;
 }
 
+export async function getPrizeConfigCollection() {
+  const database = await connectToDatabase();
+  return database.collection('prize_config');
+}
+
+export async function getPrizeConfigurations() {
+  const collection = await getPrizeConfigCollection();
+  const configs = await collection.find({
+    prizeName: { $exists: true, $type: 'string' },
+  }).toArray();
+
+  const latestByLabel = new Map();
+  configs.forEach((config) => {
+    const normalizedLabel = normalizeEntryLabel(config.prizeName);
+    if (!normalizedLabel) {
+      return;
+    }
+
+    const existing = latestByLabel.get(normalizedLabel);
+    const currentTime = Date.parse(String(config.updatedAt || '')) || 0;
+    const existingTime = existing ? Date.parse(String(existing.updatedAt || '')) || 0 : -1;
+    if (!existing || currentTime >= existingTime) {
+      latestByLabel.set(normalizedLabel, config);
+    }
+  });
+
+  return [...latestByLabel.values()].map((config) => ({
+    prizeName: config.prizeName,
+    maxWins: config.maxWins || 1,
+    currentWins: config.currentWins || 0,
+    isEternal: config.isEternal || false,
+    isDisabled: config.isDisabled || false,
+    lossMessage: config.lossMessage || '',
+    lossType: config.lossType || '',
+  }));
+}
+
+export function normalizeMilestoneSpinSchedule(rawSchedule) {
+  if (!rawSchedule || typeof rawSchedule !== 'object') {
+    return {};
+  }
+
+  const normalized = {};
+  Object.entries(rawSchedule).forEach(([spinNumber, prizeName]) => {
+    const numericSpinNumber = Number(spinNumber);
+    const cleanedPrizeName = String(prizeName || '').trim();
+    if (!Number.isInteger(numericSpinNumber) || numericSpinNumber <= 0 || !cleanedPrizeName) {
+      return;
+    }
+    normalized[String(numericSpinNumber)] = cleanedPrizeName;
+  });
+
+  return normalized;
+}
+
+export async function getMilestoneSpinSchedule() {
+  const collection = await getPrizeConfigCollection();
+  const config = await collection.findOne({ _id: '__milestone_spin_schedule__' });
+  return normalizeMilestoneSpinSchedule(config?.milestoneSpinSchedule || config?.schedule || {});
+}
+
+export async function updateMilestoneSpinSchedule(schedule) {
+  const collection = await getPrizeConfigCollection();
+  const normalizedSchedule = normalizeMilestoneSpinSchedule(schedule);
+  await collection.updateOne(
+    { _id: '__milestone_spin_schedule__' },
+    {
+      $set: {
+        milestoneSpinSchedule: normalizedSchedule,
+        updatedAt: new Date().toISOString(),
+      },
+    },
+    { upsert: true },
+  );
+  return normalizedSchedule;
+}
+
+export function normalizeRegularPrizeNames(prizes) {
+  if (!Array.isArray(prizes)) {
+    return [];
+  }
+
+  return [...new Set(
+    prizes
+      .map((prize) => String(prize || '').trim())
+      .filter(Boolean),
+  )];
+}
+
+export async function getRegularPrizeNames() {
+  const collection = await getPrizeConfigCollection();
+  const config = await collection.findOne({ _id: '__regular_spin_prizes__' });
+  return normalizeRegularPrizeNames(config?.regularPrizeNames || config?.prizes || []);
+}
+
+export async function updateRegularPrizeNames(prizes) {
+  const collection = await getPrizeConfigCollection();
+  const normalizedNames = normalizeRegularPrizeNames(prizes);
+  await collection.updateOne(
+    { _id: '__regular_spin_prizes__' },
+    {
+      $set: {
+        regularPrizeNames: normalizedNames,
+        updatedAt: new Date().toISOString(),
+      },
+    },
+    { upsert: true },
+  );
+  return normalizedNames;
+}
+
+export async function updatePrizeConfig(prizeName, maxWins, isEternal, isDisabled) {
+  const collection = await getPrizeConfigCollection();
+  const normalizedPrizeName = normalizeEntryLabel(prizeName);
+  const matchingConfigs = (await collection.find({
+    prizeName: { $exists: true, $type: 'string' },
+  }).toArray()).filter((config) => normalizeEntryLabel(config.prizeName) === normalizedPrizeName);
+
+  const timestamp = new Date().toISOString();
+  const update = {
+    $set: {
+      prizeName,
+      maxWins,
+      isEternal: isEternal || false,
+      isDisabled: isDisabled || false,
+      updatedAt: timestamp,
+    },
+    $setOnInsert: {
+      currentWins: 0,
+    },
+  };
+
+  if (matchingConfigs.length === 0) {
+    return collection.updateOne({ prizeName }, update, { upsert: true });
+  }
+
+  const [primary, ...duplicates] = matchingConfigs.sort((left, right) => {
+    const leftTime = Date.parse(String(left.updatedAt || '')) || 0;
+    const rightTime = Date.parse(String(right.updatedAt || '')) || 0;
+    return rightTime - leftTime;
+  });
+
+  const result = await collection.updateOne({ _id: primary._id }, update);
+  if (duplicates.length > 0) {
+    await collection.deleteMany({ _id: { $in: duplicates.map((config) => config._id) } });
+  }
+  return result;
+}
+
 export function getHeader(req, name) {
   const headerName = name.toLowerCase();
   const headers = req.headers || {};
