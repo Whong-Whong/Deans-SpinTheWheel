@@ -55,72 +55,215 @@
             <input id="exportAccessKey" type="password" autocomplete="off" />
           </label>
         </div>
+        <p id="adminLoginError" class="admin-login-error" aria-live="polite"></p>
         <button id="adminLoginButton" type="button" class="admin-button">Login</button>
       </section>
 
       <section id="exportTools" class="admin-tools" aria-label="Admin tools" hidden>
-        <div class="admin-tabs">
-          <button class="admin-tab-btn active" data-tab="prizes">Prize Settings</button>
-          <button class="admin-tab-btn" data-tab="export">Download Data</button>
-        </div>
-
-        <!-- Prize Settings Tab -->
-        <div id="prizes-tab" class="admin-tab-content active">
-          <div>
-            <h3>Manage Prizes</h3>
-            <p style="margin: 4px 0 20px; color: #64748b; font-size: 0.9rem;">Set how many times each prize can be won</p>
+        <div class="admin-shell">
+          <aside class="admin-sidebar" aria-label="Admin navigation">
+          <div class="brand-mark">
+            <div class="brand-icon">⚙</div>
+            <div class="brand-text">SPIN THE<br>WHEEL</div>
           </div>
-          
-          <div style="display: grid; gap: 16px; margin-bottom: 16px;">
-            <div class="prize-add-form">
-              <input id="adminEntryInput" type="text" placeholder="Add new prize (e.g. Russell Hobbs Hamper)" />
-              <button id="addAdminEntryButton" type="button">+ Add</button>
+          <nav class="sidebar-nav" aria-label="Sidebar navigation">
+            <button type="button" class="sidebar-item" data-admin-section="dashboard">Dashboard</button>
+            <button type="button" class="sidebar-item" data-admin-section="wheels">Wheels</button>
+            <button type="button" class="sidebar-item" data-admin-section="entries">Entries</button>
+            <button type="button" class="sidebar-item is-active" data-admin-section="prizes">Prizes</button>
+            <button type="button" class="sidebar-item" data-admin-section="analytics">Analytics</button>
+            <button type="button" class="sidebar-item" data-admin-section="settings">Settings</button>
+            <button type="button" class="sidebar-item" data-admin-section="users">Users</button>
+          </nav>
+          <button type="button" class="sidebar-logout">Log out</button>
+          </aside>
+
+          <div class="admin-main-panel">
+          <header class="admin-header">
+            <div>
+              <h2 id="adminSectionTitle">Prize Settings</h2>
+              <p id="adminSectionSubtitle">Manage the prizes and odds for your wheel.</p>
+            </div>
+          </header>
+
+          <div class="admin-tabs" id="adminTabs">
+            <button class="admin-tab-btn active" data-tab="prizes">Wheel Fields</button>
+            <button class="admin-tab-btn" data-tab="prize-groups">Prize Groups</button>
+            <button class="admin-tab-btn" data-tab="counter">Daily Counter</button>
+          </div>
+
+          <div class="admin-body">
+            <div class="admin-primary">
+              <div id="prizes-tab" class="admin-tab-content active">
+                <div class="stats-row">
+                  <div class="stat-card">
+                    <span class="stat-icon">🏆</span>
+                    <div>
+                      <strong id="statTotalPrizesValue">0</strong>
+                      <span>Total Fields</span>
+                    </div>
+                  </div>
+                  <div class="stat-card is-green">
+                    <span class="stat-icon">🏅</span>
+                    <div>
+                      <strong id="statBigPrizesValue">0</strong>
+                      <span>Big Prizes</span>
+                    </div>
+                  </div>
+                  <div class="stat-card is-alt">
+                    <span class="stat-icon">🎯</span>
+                    <div>
+                      <strong id="statRegularPrizesValue">0</strong>
+                      <span>Regular Prizes</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="prize-settings-card">
+                  <div class="card-headline">Add New Loss Entry</div>
+                  <p>Enter a loss label and the message shown in the modal.</p>
+                  <div class="prize-add-form">
+                    <input id="adminEntryInput" type="text" placeholder="Loss label (e.g. Better Luck Next Time)" />
+                    <input id="adminLossMessageInput" type="text" placeholder="Cute message shown after a loss" />
+                    <select id="adminLossTypeSelect" aria-label="Loss type">
+                      <option value="loss">Standard loss</option>
+                      <option value="free-spin">Free spin</option>
+                    </select>
+                    <select aria-label="Loss entry count">
+                      <option value="1">1 time</option>
+                      <option value="2">2 times</option>
+                      <option value="3">3 times</option>
+                      <option value="4">4 times</option>
+                      <option value="5">5 times</option>
+                    </select>
+                    <button id="addAdminEntryButton" type="button">+ Add Field</button>
+                  </div>
+                </div>
+
+                <div class="filter-row">
+                  <input id="prizeSearchInput" type="text" placeholder="Search wheel fields..." />
+                  <select id="prizeSortSelect" aria-label="Sort prizes">
+                    <option value="default">Sort: A - Z</option>
+                    <option value="forever-first">Sort: Forever first</option>
+                    <option value="removable-first">Sort: Removable first</option>
+                    <option value="name-asc">Sort: Name A-Z</option>
+                  </select>
+                </div>
+
+                <section class="prize-list-section">
+                  <div class="list-header">
+                    <div class="list-header-title">Loss Entries</div>
+                    <div id="wheelFieldsCountBadge" class="list-header-badge">0 fields</div>
+                  </div>
+                  <div class="pill-help">All fields currently displayed on the wheel are recorded as losses.</div>
+                  <ul id="adminEntriesList" class="admin-entries-list"></ul>
+                </section>
+                <button id="resetPrizeWinsButton" type="button" class="secondary-button reset-button">↻ Reset Win Counts</button>
+              </div>
+
+              <div id="prize-groups-tab" class="admin-tab-content">
+                <section class="prize-list-section small-gap">
+                  <div class="list-header">
+                    <div class="list-header-title">Big Prizes</div>
+                  </div>
+                  <div class="pill-help">Set spin milestones for your big prizes.</div>
+                  <div class="milestone-spin-config">
+                    <label>Big prize milestone spins</label>
+                    <div id="milestoneSpinRows" class="milestone-spin-rows" aria-label="Milestone spin entries"></div>
+                    <button id="addMilestoneSpinRowButton" type="button" class="secondary-button secondary-button--small">+ Add milestone</button>
+                    <div class="field-help">Set a spin number and the prize that should land there, e.g. Spin 20 = Pilot. Delete prizes only from the main prize list above.</div>
+                    <button id="saveMilestoneSpinScheduleButton" type="button" class="secondary-button">Save milestone spins</button>
+                  </div>
+                </section>
+
+                <section class="prize-list-section small-gap">
+                  <div class="list-header">
+                   <div class="list-header-title">Regular Prizes</div>
+                  </div>
+                  <div class="pill-help">Manage the prizes that can be selected during normal spins.</div>
+                  <div class="regular-prize-config">
+                   <label>Regular prizes</label>
+                   <div id="regularPrizeRows" class="regular-prize-rows" aria-label="Regular prize entries"></div>
+                   <button id="addRegularPrizeRowButton" type="button" class="secondary-button secondary-button--small">+ Add regular prize</button>
+                   <div class="field-help">Add a prize name for each regular prize you want to appear. Delete prizes only from the main prize list above.</div>
+                   <button id="saveRegularPrizeNamesButton" type="button" class="secondary-button">Save regular prizes</button>
+                  </div>
+                </section>
+              </div>
+
+              <div id="counter-tab" class="admin-tab-content">
+                <div>
+                 <h3>Daily spin counter</h3>
+                 <p style="margin: 4px 0 16px; color: #64748b; font-size: 0.9rem;">Load or edit the daily spin number for any date.</p>
+                </div>
+                <div class="prize-list-section small-gap">
+                 <div class="spin-counter-config">
+                   <label for="spinCounterDateInput">Date</label>
+                   <div class="spin-counter-controls">
+                     <input id="spinCounterDateInput" type="date" />
+                     <button id="loadSpinCounterButton" type="button" class="secondary-button secondary-button--small">Load counter</button>
+                   </div>
+                   <div class="spin-counter-controls">
+                     <input id="spinCounterValueInput" type="number" min="0" step="1" placeholder="0" />
+                     <button id="saveSpinCounterButton" type="button" class="secondary-button">Save counter</button>
+                   </div>
+                   <div id="spinCounterMetaText" class="field-help">Sign in as admin to view and edit the counter.</div>
+                 </div>
+                </div>
+              </div>
+
+              <div id="export-tab" class="admin-tab-content">
+                <div>
+                 <h3>Entries</h3>
+                 <p style="margin: 4px 0 16px; color: #64748b; font-size: 0.9rem;">View all registrations, sort by date, and export to Excel.</p>
+                </div>
+                <div class="entries-toolbar">
+                 <div class="date-range-form">
+                   <label>
+                     <span>From</span>
+                     <input id="entriesFromDate" type="date" />
+                   </label>
+                   <label>
+                     <span>To</span>
+                     <input id="entriesToDate" type="date" />
+                   </label>
+                 </div>
+                 <div class="entries-toolbar-row">
+                   <label class="entries-sort-field" for="entriesDateSort">
+                     <span>Sort by date</span>
+                     <select id="entriesDateSort">
+                       <option value="newest">Newest first</option>
+                       <option value="oldest">Oldest first</option>
+                     </select>
+                   </label>
+                   <button id="downloadEntriesExportButton" type="button">⬇ Download Excel</button>
+                 </div>
+                </div>
+                <div class="prize-list-section">
+                 <div class="list-header">
+                   <div class="list-header-title">All registrations</div>
+                   <div id="entriesCountBadge" class="list-header-badge">0 entries</div>
+                 </div>
+                 <div id="entriesSummaryText" class="pill-help">Sign in to view entries.</div>
+                 <div class="entries-table-wrap">
+                   <table class="entries-table">
+                     <thead>
+                       <tr>
+                         <th>Name</th>
+                         <th>School</th>
+                         <th>Email</th>
+                         <th>Registered At</th>
+                       </tr>
+                     </thead>
+                     <tbody id="entriesTableBody"></tbody>
+                   </table>
+                 </div>
+                </div>
+              </div>
             </div>
 
-            <div class="prize-search-form">
-              <input id="prizeSearchInput" type="text" placeholder="🔍 Search prizes..." />
-              <select id="prizeSortSelect" aria-label="Sort prizes">
-                <option value="default">Sort: Default</option>
-                <option value="forever-first">Sort: Forever first</option>
-                <option value="removable-first">Sort: Removable first</option>
-                <option value="name-asc">Sort: Name A-Z</option>
-              </select>
-            </div>
           </div>
-
-          <div style="display: flex; flex-direction: column; gap: 0; flex: 1; min-height: 0;">
-            <div style="display: grid; grid-template-columns: 40px 40px minmax(280px, 2.4fr) minmax(155px, 1.2fr) minmax(120px, 1fr) auto; gap: 14px; padding: 12px 16px; background: #f1f5f9; border-radius: 8px 8px 0 0; margin-bottom: 0;">
-              <div style="font-size: 0.75rem; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.3px; text-align: center;">Drag</div>
-              <div style="font-size: 0.75rem; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.3px; text-align: center;">Forever</div>
-              <div style="font-size: 0.75rem; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.3px;">Prize Name</div>
-              <div style="font-size: 0.75rem; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.3px;">Max Wins</div>
-              <div style="font-size: 0.75rem; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.3px;">Times Won</div>
-              <div style="font-size: 0.75rem; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.3px;"></div>
-            </div>
-            <ul id="adminEntriesList" class="admin-entries-list"></ul>
           </div>
-
-          <button id="resetPrizeWinsButton" type="button" class="secondary-button">↻ Reset Win Counts</button>
-        </div>
-
-        <!-- Export Tab -->
-        <div id="export-tab" class="admin-tab-content">
-          <div>
-            <h3>Download Registrations</h3>
-            <p style="margin: 4px 0 16px; color: #64748b; font-size: 0.9rem;">Export participant data to Excel</p>
-          </div>
-          
-          <div class="date-range-form">
-            <label>
-              <span>From</span>
-              <input id="exportFromDate" type="date" />
-            </label>
-            <label>
-              <span>To</span>
-              <input id="exportToDate" type="date" />
-            </label>
-          </div>
-          <button id="downloadExportButton" type="button">⬇ Download Excel</button>
         </div>
       </section>
     </section>

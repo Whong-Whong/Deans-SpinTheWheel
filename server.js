@@ -147,6 +147,11 @@ function getLocalDayKey(date = new Date()) {
   return `${year}-${month}-${day}`;
 }
 
+function normalizeDateKey(value) {
+  const dateKey = String(value || '').trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(dateKey) ? dateKey : '';
+}
+
 function normalizeSpinResult(payload) {
   if (!payload || typeof payload !== 'object') {
     return null;
@@ -227,6 +232,44 @@ function normalizeEntryList(entries) {
     .filter(Boolean);
 }
 
+function normalizePrizeLabel(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9 ]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function normalizeLossMessages(messages) {
+  if (!messages || typeof messages !== 'object' || Array.isArray(messages)) {
+    return {};
+  }
+
+  return Object.entries(messages).reduce((acc, [label, message]) => {
+    const normalizedLabel = normalizePrizeLabel(label);
+    const cleanedMessage = String(message || '').trim();
+    if (normalizedLabel && cleanedMessage) {
+      acc[normalizedLabel] = cleanedMessage;
+    }
+    return acc;
+  }, {});
+}
+
+function normalizeLossTypes(types) {
+  if (!types || typeof types !== 'object' || Array.isArray(types)) {
+    return {};
+  }
+
+  return Object.entries(types).reduce((acc, [label, type]) => {
+    const normalizedLabel = normalizePrizeLabel(label);
+    const cleanedType = String(type || '').trim().toLowerCase();
+    if (normalizedLabel && (cleanedType === 'loss' || cleanedType === 'free-spin')) {
+      acc[normalizedLabel] = cleanedType;
+    }
+    return acc;
+  }, {});
+}
+
 async function loadDefaultEntriesFromFile() {
   const candidates = [
     path.join(staticDir, 'entries.json'),
@@ -261,6 +304,32 @@ async function getConfiguredEntries() {
   return normalizeEntryList(config?.entries);
 }
 
+async function getConfiguredLossMessages() {
+  const entriesCollection = await getManagedEntriesCollection();
+  const entriesConfig = await entriesCollection.findOne({ _id: entriesConfigDocumentId });
+  const fromEntriesConfig = normalizeLossMessages(entriesConfig?.lossMessages || entriesConfig?.messages || {});
+  const configs = await getPrizeConfigurations();
+  const fromPrizeConfig = Object.fromEntries(
+    configs
+      .map((config) => [normalizePrizeLabel(config.prizeName), String(config.lossMessage || '').trim()])
+      .filter(([, message]) => message),
+  );
+  return { ...fromPrizeConfig, ...fromEntriesConfig };
+}
+
+async function getConfiguredLossTypes() {
+  const entriesCollection = await getManagedEntriesCollection();
+  const entriesConfig = await entriesCollection.findOne({ _id: entriesConfigDocumentId });
+  const fromEntriesConfig = normalizeLossTypes(entriesConfig?.lossTypes || entriesConfig?.types || {});
+  const configs = await getPrizeConfigurations();
+  const fromPrizeConfig = Object.fromEntries(
+    configs
+      .map((config) => [normalizePrizeLabel(config.prizeName), String(config.lossType || '').trim().toLowerCase()])
+      .filter(([, type]) => type === 'loss' || type === 'free-spin'),
+  );
+  return { ...fromPrizeConfig, ...fromEntriesConfig };
+}
+
 async function getCurrentEntriesForAdmin() {
   const configuredEntries = await getConfiguredEntries();
   if (configuredEntries.length > 0) {
@@ -270,20 +339,32 @@ async function getCurrentEntriesForAdmin() {
   return loadDefaultEntriesFromFile();
 }
 
-async function saveConfiguredEntries(entries) {
+async function saveConfiguredEntries(entries, lossMessages, lossTypes) {
   const collection = await getManagedEntriesCollection();
   const normalizedEntries = normalizeEntryList(entries);
+  const update = {
+    $set: {
+      entries: normalizedEntries,
+      updatedAt: new Date().toISOString(),
+    },
+  };
+
+  if (lossMessages !== undefined) {
+    update.$set.lossMessages = normalizeLossMessages(lossMessages);
+  }
+
+  if (lossTypes !== undefined) {
+    update.$set.lossTypes = normalizeLossTypes(lossTypes);
+  }
+
   await collection.updateOne(
     { _id: entriesConfigDocumentId },
-    {
-      $set: {
-        entries: normalizedEntries,
-        updatedAt: new Date().toISOString(),
-      },
-    },
+    update,
     { upsert: true },
   );
 
+  await pruneDeletedPrizeConfigurations(normalizedEntries);
+  await ensurePrizeConfigurationsForEntries(normalizedEntries);
   return normalizedEntries;
 }
 
@@ -292,20 +373,96 @@ async function getPrizeConfigCollection() {
   return database.collection('prize_config');
 }
 
+async function pruneDeletedPrizeConfigurations(activeEntries) {
+  const collection = await getPrizeConfigCollection();
+  const activeLabels = new Set(normalizeEntryList(activeEntries).map((entry) => normalizePrizeLabel(entry)));
+  const existingPrizeConfigs = await collection.find({
+    prizeName: { $exists: true, $type: 'string' },
+  }).toArray();
+
+  const staleIds = existingPrizeConfigs
+    .filter((config) => !activeLabels.has(normalizePrizeLabel(config.prizeName)))
+    .map((config) => config._id);
+
+  if (staleIds.length > 0) {
+    await collection.deleteMany({ _id: { $in: staleIds } });
+  }
+}
+
+async function ensurePrizeConfigurationsForEntries(entries) {
+  const normalizedEntries = normalizeEntryList(entries);
+  if (normalizedEntries.length === 0) {
+    return;
+  }
+
+  const collection = await getPrizeConfigCollection();
+  const timestamp = new Date().toISOString();
+  await collection.bulkWrite(
+    normalizedEntries.map((prizeName) => ({
+      updateOne: {
+        filter: { prizeName },
+        update: {
+          $setOnInsert: {
+            prizeName,
+            maxWins: 1,
+            currentWins: 0,
+            isEternal: false,
+            isDisabled: false,
+            lossMessage: '',
+            lossType: '',
+            updatedAt: timestamp,
+          },
+        },
+        upsert: true,
+      },
+    })),
+    { ordered: false },
+  );
+}
+
 async function getPrizeConfigurations() {
   const collection = await getPrizeConfigCollection();
-  const configs = await collection.find({}).toArray();
-  return configs.map((config) => ({
+  const configs = await collection.find({
+    prizeName: { $exists: true, $type: 'string' },
+  }).toArray();
+
+  const normalizedConfigs = new Map();
+  configs.forEach((config) => {
+    const normalizedLabel = normalizePrizeLabel(config.prizeName);
+    if (!normalizedLabel) {
+      return;
+    }
+
+    const existing = normalizedConfigs.get(normalizedLabel);
+    const currentTime = Date.parse(String(config.updatedAt || '')) || 0;
+    const existingTime = existing ? Date.parse(String(existing.updatedAt || '')) || 0 : -1;
+    if (!existing || currentTime >= existingTime) {
+      normalizedConfigs.set(normalizedLabel, config);
+    }
+  });
+
+  return [...normalizedConfigs.values()].map((config) => ({
     prizeName: config.prizeName,
     maxWins: config.maxWins || 1,
     currentWins: config.currentWins || 0,
     isEternal: config.isEternal || false,
+    isDisabled: config.isDisabled || false,
+    lossMessage: config.lossMessage || '',
+    lossType: config.lossType || '',
   }));
 }
 
 async function getPrizeConfig(prizeName) {
   const collection = await getPrizeConfigCollection();
-  const config = await collection.findOne({ prizeName });
+  const normalizedPrizeName = normalizePrizeLabel(prizeName);
+  const matchingConfigs = (await collection.find({
+    prizeName: { $exists: true, $type: 'string' },
+  }).toArray()).filter((config) => normalizePrizeLabel(config.prizeName) === normalizedPrizeName);
+  const config = matchingConfigs.sort((left, right) => {
+    const leftTime = Date.parse(String(left.updatedAt || '')) || 0;
+    const rightTime = Date.parse(String(right.updatedAt || '')) || 0;
+    return rightTime - leftTime;
+  })[0];
   if (!config) {
     return { prizeName, maxWins: 1, currentWins: 0, isEternal: false };
   }
@@ -314,26 +471,239 @@ async function getPrizeConfig(prizeName) {
     maxWins: config.maxWins || 1,
     currentWins: config.currentWins || 0,
     isEternal: config.isEternal || false,
+    isDisabled: config.isDisabled || false,
+    lossMessage: config.lossMessage || '',
+    lossType: config.lossType || '',
   };
 }
 
-async function updatePrizeConfig(prizeName, maxWins, isEternal) {
+function normalizeMilestoneSpinSchedule(rawSchedule) {
+  if (!rawSchedule || typeof rawSchedule !== 'object') {
+    return {};
+  }
+
+  const normalized = {};
+  Object.entries(rawSchedule).forEach(([spinNumber, prizeName]) => {
+    const numericSpinNumber = Number(spinNumber);
+    const cleanedPrizeName = String(prizeName || '').trim();
+    if (!Number.isInteger(numericSpinNumber) || numericSpinNumber <= 0 || !cleanedPrizeName) {
+      return;
+    }
+    normalized[String(numericSpinNumber)] = cleanedPrizeName;
+  });
+
+  return normalized;
+}
+
+async function getMilestoneSpinSchedule() {
   const collection = await getPrizeConfigCollection();
-  const result = await collection.updateOne(
-    { prizeName },
+  const config = await collection.findOne({ _id: '__milestone_spin_schedule__' });
+  return normalizeMilestoneSpinSchedule(config?.milestoneSpinSchedule || config?.schedule || {});
+}
+
+async function updateMilestoneSpinSchedule(schedule) {
+  const collection = await getPrizeConfigCollection();
+  const normalizedSchedule = normalizeMilestoneSpinSchedule(schedule);
+  await collection.updateOne(
+    { _id: '__milestone_spin_schedule__' },
     {
       $set: {
+        milestoneSpinSchedule: normalizedSchedule,
+        updatedAt: new Date().toISOString(),
+      }
+    },
+    { upsert: true },
+  );
+  return normalizedSchedule;
+}
+
+function normalizeRegularPrizeNames(prizes) {
+  if (!Array.isArray(prizes)) {
+    return [];
+  }
+
+  return [...new Set(
+    prizes
+      .map((prize) => String(prize || '').trim())
+      .filter(Boolean)
+  )];
+}
+
+async function getRegularPrizeNames() {
+  const collection = await getPrizeConfigCollection();
+  const config = await collection.findOne({ _id: '__regular_spin_prizes__' });
+  return normalizeRegularPrizeNames(config?.regularPrizeNames || config?.prizes || []);
+}
+
+async function readDailySpinCounter(dateKey) {
+  const collection = await getSpinCounterCollection();
+  const counter = await collection.findOne({ dateKey });
+  const countValue = Number(counter?.count);
+  const spinNumber = Number.isInteger(countValue) && countValue >= 0 ? countValue : 0;
+  return { spinDateKey: dateKey, spinNumber, exists: Boolean(counter) };
+}
+
+async function updateRegularPrizeNames(prizes) {
+  const collection = await getPrizeConfigCollection();
+  const normalizedNames = normalizeRegularPrizeNames(prizes);
+  await collection.updateOne(
+    { _id: '__regular_spin_prizes__' },
+    {
+      $set: {
+        regularPrizeNames: normalizedNames,
+        updatedAt: new Date().toISOString(),
+      }
+    },
+    { upsert: true },
+  );
+  return normalizedNames;
+}
+
+async function updatePrizeConfig(prizeName, maxWins, isEternal, isDisabled) {
+  const collection = await getPrizeConfigCollection();
+  const normalizedPrizeName = normalizePrizeLabel(prizeName);
+  const matchingConfigs = (await collection.find({
+    prizeName: { $exists: true, $type: 'string' },
+  }).toArray()).filter((config) => normalizePrizeLabel(config.prizeName) === normalizedPrizeName);
+  const timestamp = new Date().toISOString();
+  const update = {
+    $set: {
+      prizeName,
+      maxWins,
+      isEternal: isEternal || false,
+      isDisabled: isDisabled || false,
+      updatedAt: timestamp,
+    },
+    $setOnInsert: {
+      currentWins: 0,
+    },
+  };
+
+  if (matchingConfigs.length === 0) {
+    return collection.updateOne(
+      { prizeName },
+      update,
+      { upsert: true },
+    );
+  }
+
+  const [primary, ...duplicates] = matchingConfigs.sort((left, right) => {
+    const leftTime = Date.parse(String(left.updatedAt || '')) || 0;
+    const rightTime = Date.parse(String(right.updatedAt || '')) || 0;
+    return rightTime - leftTime;
+  });
+
+  const result = await collection.updateOne(
+    { _id: primary._id },
+    {
+      $set: {
+        prizeName,
         maxWins,
         isEternal: isEternal || false,
-        updatedAt: new Date().toISOString(),
+        isDisabled: isDisabled || false,
+        updatedAt: timestamp,
       },
       $setOnInsert: {
         currentWins: 0,
       },
     },
-    { upsert: true },
   );
+
+  if (duplicates.length > 0) {
+    await collection.deleteMany({ _id: { $in: duplicates.map((config) => config._id) } });
+  }
+
   return result;
+}
+
+async function incrementPrizeWinCount(prizeName) {
+  const collection = await getPrizeConfigCollection();
+  const normalizedPrizeName = normalizePrizeLabel(prizeName);
+  const matchingConfigs = (await collection.find({
+    prizeName: { $exists: true, $type: 'string' },
+  }).toArray()).filter((config) => normalizePrizeLabel(config.prizeName) === normalizedPrizeName);
+  const timestamp = new Date().toISOString();
+  const update = {
+    $inc: { currentWins: 1 },
+    $set: { updatedAt: timestamp },
+    $setOnInsert: { maxWins: 1 },
+  };
+  if (matchingConfigs.length === 0) {
+    return collection.updateOne(
+      { prizeName },
+      update,
+      { upsert: true },
+    );
+  }
+
+  const [primary, ...duplicates] = matchingConfigs.sort((left, right) => {
+    const leftTime = Date.parse(String(left.updatedAt || '')) || 0;
+    const rightTime = Date.parse(String(right.updatedAt || '')) || 0;
+    return rightTime - leftTime;
+  });
+
+  const result = await collection.updateOne(
+    { _id: primary._id },
+    {
+      ...update,
+      $set: {
+        ...update.$set,
+        prizeName,
+      },
+    },
+  );
+
+  if (duplicates.length > 0) {
+    await collection.deleteMany({ _id: { $in: duplicates.map((config) => config._id) } });
+  }
+
+  return result;
+}
+
+async function upsertLossEntryConfig(prizeName, lossMessage, lossType) {
+  const collection = await getPrizeConfigCollection();
+  const normalizedPrizeName = normalizePrizeLabel(prizeName);
+  if (!normalizedPrizeName) {
+    return;
+  }
+
+  const matchingConfigs = (await collection.find({
+    prizeName: { $exists: true, $type: 'string' },
+  }).toArray()).filter((config) => normalizePrizeLabel(config.prizeName) === normalizedPrizeName);
+
+  const timestamp = new Date().toISOString();
+  const update = {
+    $set: {
+      lossMessage: String(lossMessage || '').trim(),
+      lossType: lossType === 'free-spin' ? 'free-spin' : 'loss',
+      updatedAt: timestamp,
+    },
+    $setOnInsert: {
+      prizeName,
+      currentWins: 0,
+      maxWins: 1,
+      isEternal: true,
+      isDisabled: false,
+    },
+  };
+
+  if (matchingConfigs.length === 0) {
+    await collection.updateOne({ prizeName }, update, { upsert: true });
+    return;
+  }
+
+  const [primary, ...duplicates] = matchingConfigs
+    .sort((left, right) => {
+      const leftTime = Date.parse(String(left.updatedAt || '')) || 0;
+      const rightTime = Date.parse(String(right.updatedAt || '')) || 0;
+      return rightTime - leftTime;
+    });
+
+  await collection.updateOne({ _id: primary._id }, update);
+
+  if (duplicates.length > 0) {
+    await collection.deleteMany({ _id: { $in: duplicates.map((config) => config._id) } });
+  }
 }
 
 async function incrementPrizeWinCount(prizeName) {
@@ -389,13 +759,15 @@ app.get('/api/participants', async (_req, res) => {
 app.get('/api/entries', async (_req, res) => {
   try {
     const configuredEntries = await getConfiguredEntries();
+    const lossMessages = await getConfiguredLossMessages();
+    const lossTypes = await getConfiguredLossTypes();
     if (configuredEntries.length > 0) {
-      res.json({ entries: configuredEntries, source: 'admin' });
+      res.json({ entries: configuredEntries, lossMessages, lossTypes, source: 'admin' });
       return;
     }
 
     const defaultEntries = await loadDefaultEntriesFromFile();
-    res.json({ entries: defaultEntries, source: 'default' });
+    res.json({ entries: defaultEntries, lossMessages: {}, lossTypes: {}, source: 'default' });
   } catch (error) {
     res.status(500).json({
       error: error instanceof Error ? error.message : 'Unable to load wheel entries',
@@ -423,7 +795,9 @@ app.get('/api/admin/entries', async (req, res) => {
 
   try {
     const entries = await getCurrentEntriesForAdmin();
-    res.json({ entries });
+    const lossMessages = await getConfiguredLossMessages();
+    const lossTypes = await getConfiguredLossTypes();
+    res.json({ entries, lossMessages, lossTypes });
   } catch (error) {
     res.status(500).json({
       error: error instanceof Error ? error.message : 'Unable to load wheel entries',
@@ -439,6 +813,8 @@ app.post('/api/admin/entries', async (req, res) => {
   }
 
   const label = String(req.body?.label || '').trim();
+  const message = String(req.body?.message || '').trim();
+  const lossType = String(req.body?.lossType || 'loss').trim().toLowerCase();
   if (!label) {
     res.status(400).json({ error: 'Entry label is required.' });
     return;
@@ -446,9 +822,30 @@ app.post('/api/admin/entries', async (req, res) => {
 
   try {
     const entries = await getCurrentEntriesForAdmin();
-    entries.push(label);
-    const updatedEntries = await saveConfiguredEntries(entries);
-    res.status(201).json({ entries: updatedEntries });
+    const normalizedLabel = normalizePrizeLabel(label);
+    const existingIndex = entries.findIndex((entry) => normalizePrizeLabel(entry) === normalizedLabel);
+    if (existingIndex < 0) {
+      entries.push(label);
+    }
+    const targetPrizeName = existingIndex >= 0 ? entries[existingIndex] : label;
+    const lossMessages = await getConfiguredLossMessages();
+    const lossTypes = await getConfiguredLossTypes();
+    const nextLossMessages = { ...lossMessages };
+    const nextLossTypes = { ...lossTypes };
+    if (message) {
+      nextLossMessages[normalizedLabel] = message;
+    }
+    nextLossTypes[normalizedLabel] = lossType === 'free-spin' ? 'free-spin' : 'loss';
+    await upsertLossEntryConfig(targetPrizeName, message, lossType);
+    const updatedEntries = await saveConfiguredEntries(entries, nextLossMessages, nextLossTypes);
+    const prizeConfigs = await getPrizeConfigurations();
+    res.status(existingIndex < 0 ? 201 : 200).json({
+      entries: updatedEntries,
+      prizeConfigs,
+      lossMessages: nextLossMessages,
+      lossTypes: nextLossTypes,
+      action: existingIndex < 0 ? 'created' : 'updated',
+    });
   } catch (error) {
     res.status(500).json({
       error: error instanceof Error ? error.message : 'Unable to add wheel entry',
@@ -464,21 +861,42 @@ app.delete('/api/admin/entries', async (req, res) => {
   }
 
   const index = Number(req.body?.index);
-  if (!Number.isInteger(index) || index < 0) {
-    res.status(400).json({ error: 'A valid entry index is required.' });
-    return;
-  }
+  const label = String(req.body?.label || '').trim();
 
   try {
     const entries = await getCurrentEntriesForAdmin();
-    if (index >= entries.length) {
+    let deleteIndex = Number.isInteger(index) && index >= 0 ? index : -1;
+    let removedEntry = '';
+
+    if (label) {
+      const normalizedLabel = normalizePrizeLabel(label);
+      deleteIndex = entries.findIndex((entry) => normalizePrizeLabel(entry) === normalizedLabel);
+    }
+
+    if (deleteIndex < 0 || deleteIndex >= entries.length) {
       res.status(404).json({ error: 'Wheel entry not found.' });
       return;
     }
 
-    entries.splice(index, 1);
-    const updatedEntries = await saveConfiguredEntries(entries);
-    res.json({ entries: updatedEntries });
+    removedEntry = entries[deleteIndex];
+    entries.splice(deleteIndex, 1);
+    const lossMessages = await getConfiguredLossMessages();
+    const lossTypes = await getConfiguredLossTypes();
+    const normalizedRemovedEntry = normalizePrizeLabel(removedEntry);
+    const nextLossMessages = { ...lossMessages };
+    const nextLossTypes = { ...lossTypes };
+    delete nextLossMessages[normalizedRemovedEntry];
+    delete nextLossTypes[normalizedRemovedEntry];
+    const updatedEntries = await saveConfiguredEntries(entries, nextLossMessages, nextLossTypes);
+    const collection = await getPrizeConfigCollection();
+    await collection.deleteOne({ prizeName: removedEntry });
+    const prizeConfigs = await getPrizeConfigurations();
+    res.json({
+      entries: updatedEntries,
+      prizeConfigs,
+      lossMessages: nextLossMessages,
+      lossTypes: nextLossTypes,
+    });
   } catch (error) {
     res.status(500).json({
       error: error instanceof Error ? error.message : 'Unable to remove wheel entry',
@@ -500,16 +918,11 @@ app.put('/api/admin/entries', async (req, res) => {
   }
 
   try {
-    const entries = await getCurrentEntriesForAdmin();
-    
-    // Validate that the order contains the same entries
-    if (order.length !== entries.length || !order.every(e => entries.includes(e))) {
-      res.status(400).json({ error: 'Invalid order: entries do not match.' });
-      return;
-    }
-
-    const updatedEntries = await saveConfiguredEntries(order);
-    res.json({ entries: updatedEntries });
+    const lossMessages = await getConfiguredLossMessages();
+    const lossTypes = await getConfiguredLossTypes();
+    const updatedEntries = await saveConfiguredEntries(order, lossMessages, lossTypes);
+    const prizeConfigs = await getPrizeConfigurations();
+    res.json({ entries: updatedEntries, prizeConfigs, lossMessages, lossTypes });
   } catch (error) {
     res.status(500).json({
       error: error instanceof Error ? error.message : 'Unable to reorder wheel entries',
@@ -545,6 +958,100 @@ app.get('/api/prize-config', async (_req, res) => {
   }
 });
 
+app.get('/api/admin/milestone-config', async (req, res) => {
+  const auth = isAuthorizedExportRequest(req);
+  if (!auth.ok) {
+    res.status(auth.status).json({ error: auth.error });
+    return;
+  }
+
+  try {
+    const milestoneSpinSchedule = await getMilestoneSpinSchedule();
+    res.json({ milestoneSpinSchedule });
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : 'Unable to load milestone configuration',
+    });
+  }
+});
+
+app.get('/api/milestone-config', async (_req, res) => {
+  try {
+    const milestoneSpinSchedule = await getMilestoneSpinSchedule();
+    res.json({ milestoneSpinSchedule });
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : 'Unable to load milestone configuration',
+    });
+  }
+});
+
+app.post('/api/admin/milestone-config', async (req, res) => {
+  const auth = isAuthorizedExportRequest(req);
+  if (!auth.ok) {
+    res.status(auth.status).json({ error: auth.error });
+    return;
+  }
+
+  const schedule = normalizeMilestoneSpinSchedule(req.body?.milestoneSpinSchedule || req.body?.schedule || {});
+
+  try {
+    const milestoneSpinSchedule = await updateMilestoneSpinSchedule(schedule);
+    res.json({ milestoneSpinSchedule });
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : 'Unable to update milestone configuration',
+    });
+  }
+});
+
+app.get('/api/admin/regular-prize-config', async (req, res) => {
+  const auth = isAuthorizedExportRequest(req);
+  if (!auth.ok) {
+    res.status(auth.status).json({ error: auth.error });
+    return;
+  }
+
+  try {
+    const regularPrizeNames = await getRegularPrizeNames();
+    res.json({ regularPrizeNames });
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : 'Unable to load regular prize names',
+    });
+  }
+});
+
+app.get('/api/regular-prize-config', async (_req, res) => {
+  try {
+    const regularPrizeNames = await getRegularPrizeNames();
+    res.json({ regularPrizeNames });
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : 'Unable to load regular prize names',
+    });
+  }
+});
+
+app.post('/api/admin/regular-prize-config', async (req, res) => {
+  const auth = isAuthorizedExportRequest(req);
+  if (!auth.ok) {
+    res.status(auth.status).json({ error: auth.error });
+    return;
+  }
+
+  const names = normalizeRegularPrizeNames(req.body?.regularPrizeNames || req.body?.prizes || []);
+
+  try {
+    const regularPrizeNames = await updateRegularPrizeNames(names);
+    res.json({ regularPrizeNames });
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : 'Unable to update regular prize names',
+    });
+  }
+});
+
 app.post('/api/admin/prize-config', async (req, res) => {
   const auth = isAuthorizedExportRequest(req);
   if (!auth.ok) {
@@ -552,14 +1059,14 @@ app.post('/api/admin/prize-config', async (req, res) => {
     return;
   }
 
-  const { prizeName, maxWins, isEternal } = req.body || {};
+  const { prizeName, maxWins, isEternal, isDisabled } = req.body || {};
   if (!prizeName || typeof maxWins !== 'number' || maxWins < 1) {
     res.status(400).json({ error: 'Prize name and valid maxWins (≥1) are required.' });
     return;
   }
 
   try {
-    await updatePrizeConfig(prizeName, maxWins, isEternal);
+    await updatePrizeConfig(prizeName, maxWins, isEternal, isDisabled);
     const config = await getPrizeConfig(prizeName);
     res.json({ config });
   } catch (error) {
@@ -606,6 +1113,61 @@ app.post('/api/admin/reset-prize-wins', async (req, res) => {
   } catch (error) {
     res.status(500).json({
       error: error instanceof Error ? error.message : 'Unable to reset prize wins',
+    });
+  }
+});
+
+app.get('/api/admin/spin-counter', async (req, res) => {
+  const auth = isAuthorizedExportRequest(req);
+  if (!auth.ok) {
+    res.status(auth.status).json({ error: auth.error });
+    return;
+  }
+
+  const dateKeyFromQuery = normalizeDateKey(req.query.dateKey);
+  const dateKey = dateKeyFromQuery || getLocalDayKey(new Date());
+
+  try {
+    const counter = await readDailySpinCounter(dateKey);
+    res.json(counter);
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : 'Unable to load spin counter',
+    });
+  }
+});
+
+app.post('/api/admin/spin-counter', async (req, res) => {
+  const auth = isAuthorizedExportRequest(req);
+  if (!auth.ok) {
+    res.status(auth.status).json({ error: auth.error });
+    return;
+  }
+
+  const requestedDateKey = normalizeDateKey(req.body?.dateKey);
+  const dateKey = requestedDateKey || getLocalDayKey(new Date());
+  const spinNumber = Number(req.body?.spinNumber);
+  if (!Number.isInteger(spinNumber) || spinNumber < 0) {
+    res.status(400).json({ error: 'spinNumber must be an integer greater than or equal to 0.' });
+    return;
+  }
+
+  try {
+    const timestamp = new Date().toISOString();
+    const collection = await getSpinCounterCollection();
+    await collection.updateOne(
+      { dateKey },
+      {
+        $set: { count: spinNumber, updatedAt: timestamp },
+        $setOnInsert: { dateKey, createdAt: timestamp },
+      },
+      { upsert: true },
+    );
+
+    res.json({ spinDateKey: dateKey, spinNumber, exists: true });
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : 'Unable to update spin counter',
     });
   }
 });

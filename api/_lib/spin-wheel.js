@@ -38,6 +38,17 @@ export async function connectToMongo() {
       mongoDatabase = mongoClient.db(databaseName);
       participantsCollection = mongoDatabase.collection(collectionName);
       await participantsCollection.createIndex({ submittedAt: 1 });
+      await participantsCollection.createIndex({ emailNormalized: 1, submittedAt: 1 });
+      await participantsCollection.createIndex(
+        { playDate: 1, emailNormalized: 1 },
+        {
+          unique: true,
+          partialFilterExpression: {
+            playDate: { $exists: true },
+            emailNormalized: { $exists: true },
+          },
+        },
+      );
       return participantsCollection;
     })().catch((error) => {
       mongoConnectPromise = null;
@@ -51,6 +62,14 @@ export async function connectToMongo() {
 export async function connectToDatabase() {
   await connectToMongo();
   return mongoDatabase;
+}
+
+export function normalizeEntryLabel(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9 ]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 export function normalizeParticipant(participant) {
@@ -90,11 +109,31 @@ export function parseDateOnly(value) {
   return date;
 }
 
+export function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+export function getLocalDayWindow(date = new Date()) {
+  const start = new Date(date);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+  return {
+    startIso: start.toISOString(),
+    endIso: end.toISOString(),
+  };
+}
+
 export function getLocalDayKey(date = new Date()) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
+}
+
+export function normalizeDateKey(value) {
+  const dateKey = String(value || '').trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(dateKey) ? dateKey : '';
 }
 
 export function normalizeEntryList(entries) {
@@ -148,6 +187,56 @@ export async function getConfiguredEntries() {
   return normalizeEntryList(config?.entries);
 }
 
+export async function getConfiguredLossMessages() {
+  const collection = await getManagedEntriesCollection();
+  const config = await collection.findOne({ _id: entriesConfigDocumentId });
+  return normalizeLossMessages(config?.lossMessages || config?.messages || {});
+}
+
+export async function getConfiguredLossTypes() {
+  const collection = await getManagedEntriesCollection();
+  const config = await collection.findOne({ _id: entriesConfigDocumentId });
+  return normalizeLossTypes(config?.lossTypes || config?.types || {});
+}
+
+export function normalizeLossMessages(messages) {
+  if (!messages || typeof messages !== 'object' || Array.isArray(messages)) {
+    return {};
+  }
+
+  const normalized = {};
+  Object.entries(messages).forEach(([label, message]) => {
+    const normalizedLabel = normalizeEntryLabel(label);
+    const cleanedMessage = String(message || '').trim();
+    if (!normalizedLabel || !cleanedMessage) {
+      return;
+    }
+
+    normalized[normalizedLabel] = cleanedMessage;
+  });
+
+  return normalized;
+}
+
+export function normalizeLossTypes(types) {
+  if (!types || typeof types !== 'object' || Array.isArray(types)) {
+    return {};
+  }
+
+  const normalized = {};
+  Object.entries(types).forEach(([label, type]) => {
+    const normalizedLabel = normalizeEntryLabel(label);
+    const cleanedType = String(type || '').trim().toLowerCase();
+    if (!normalizedLabel || (cleanedType !== 'loss' && cleanedType !== 'free-spin')) {
+      return;
+    }
+
+    normalized[normalizedLabel] = cleanedType;
+  });
+
+  return normalized;
+}
+
 export async function getCurrentEntriesForAdmin() {
   const configuredEntries = await getConfiguredEntries();
   if (configuredEntries.length > 0) {
@@ -157,19 +246,25 @@ export async function getCurrentEntriesForAdmin() {
   return loadDefaultEntriesFromFile();
 }
 
-export async function saveConfiguredEntries(entries) {
+export async function saveConfiguredEntries(entries, lossMessages, lossTypes) {
   const collection = await getManagedEntriesCollection();
   const normalizedEntries = normalizeEntryList(entries);
-  await collection.updateOne(
-    { _id: entriesConfigDocumentId },
-    {
-      $set: {
-        entries: normalizedEntries,
-        updatedAt: new Date().toISOString(),
-      },
+  const update = {
+    $set: {
+      entries: normalizedEntries,
+      updatedAt: new Date().toISOString(),
     },
-    { upsert: true },
-  );
+  };
+
+  if (lossMessages !== undefined) {
+    update.$set.lossMessages = normalizeLossMessages(lossMessages);
+  }
+
+  if (lossTypes !== undefined) {
+    update.$set.lossTypes = normalizeLossTypes(lossTypes);
+  }
+
+  await collection.updateOne({ _id: entriesConfigDocumentId }, update, { upsert: true });
 
   return normalizedEntries;
 }
@@ -325,6 +420,79 @@ export async function handleReserveNextSpinCounter(_req, res) {
   }
 }
 
+export async function readDailySpinCounter(dateKey) {
+  const collection = await getSpinCounterCollection();
+  const counter = await collection.findOne({ dateKey });
+  const countValue = Number(counter?.count);
+  const spinNumber = Number.isInteger(countValue) && countValue >= 0 ? countValue : 0;
+  return { spinDateKey: dateKey, spinNumber, exists: Boolean(counter) };
+}
+
+export async function handleGetAdminSpinCounter(req, res) {
+  const auth = isAuthorizedExportRequest(req);
+  if (!auth.ok) {
+    res.status(auth.status).json({ error: auth.error });
+    return;
+  }
+
+  const requestUrl = getRequestUrl(req);
+  const dateKeyFromQuery = normalizeDateKey(requestUrl.searchParams.get('dateKey'));
+  const dateKey = dateKeyFromQuery || getLocalDayKey(new Date());
+
+  try {
+    const counter = await readDailySpinCounter(dateKey);
+    res.status(200).json(counter);
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : 'Unable to load spin counter',
+    });
+  }
+}
+
+export async function handleSetAdminSpinCounter(req, res) {
+  const auth = isAuthorizedExportRequest(req);
+  if (!auth.ok) {
+    res.status(auth.status).json({ error: auth.error });
+    return;
+  }
+
+  let body;
+
+  try {
+    body = await readJsonBody(req);
+  } catch {
+    res.status(400).json({ error: 'Request body must be valid JSON.' });
+    return;
+  }
+
+  const requestedDateKey = normalizeDateKey(body?.dateKey);
+  const dateKey = requestedDateKey || getLocalDayKey(new Date());
+  const spinNumber = Number(body?.spinNumber);
+  if (!Number.isInteger(spinNumber) || spinNumber < 0) {
+    res.status(400).json({ error: 'spinNumber must be an integer greater than or equal to 0.' });
+    return;
+  }
+
+  try {
+    const timestamp = new Date().toISOString();
+    const collection = await getSpinCounterCollection();
+    await collection.updateOne(
+      { dateKey },
+      {
+        $set: { count: spinNumber, updatedAt: timestamp },
+        $setOnInsert: { dateKey, createdAt: timestamp },
+      },
+      { upsert: true },
+    );
+
+    res.status(200).json({ spinDateKey: dateKey, spinNumber, exists: true });
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : 'Unable to update spin counter',
+    });
+  }
+}
+
 export async function handleCreateParticipant(req, res) {
   let body;
 
@@ -337,26 +505,48 @@ export async function handleCreateParticipant(req, res) {
 
   const { fullName, name, school, email } = body || {};
   const resolvedFullName = String(fullName || name || '').trim();
+  const resolvedSchool = String(school || '').trim();
+  const resolvedEmail = String(email || '').trim();
+  const normalizedEmail = resolvedEmail.toLowerCase();
 
-  if (!resolvedFullName || !school || !email) {
+  if (!resolvedFullName || !resolvedSchool || !resolvedEmail) {
     res.status(400).json({ error: 'Full name, school, and email are required.' });
     return;
   }
 
   try {
     const collection = await connectToMongo();
+    const { startIso, endIso } = getLocalDayWindow();
+    const duplicateToday = await collection.findOne({
+      submittedAt: { $gte: startIso, $lt: endIso },
+      $or: [
+        { emailNormalized: normalizedEmail },
+        { email: { $regex: `^${escapeRegExp(resolvedEmail)}$`, $options: 'i' } },
+      ],
+    });
+    if (duplicateToday) {
+      res.status(409).json({ error: 'This email has already played today. Please try again tomorrow.' });
+      return;
+    }
+
     const participant = {
       id: randomUUID(),
       fullName: resolvedFullName,
       name: resolvedFullName,
-      school: String(school).trim(),
-      email: String(email).trim(),
+      school: resolvedSchool,
+      email: resolvedEmail,
+      emailNormalized: normalizedEmail,
+      playDate: getLocalDayKey(),
       submittedAt: new Date().toISOString(),
     };
 
     await collection.insertOne(participant);
     res.status(201).json(participant);
   } catch (error) {
+    if (error && typeof error === 'object' && error.code === 11000) {
+      res.status(409).json({ error: 'This email has already played today. Please try again tomorrow.' });
+      return;
+    }
     res.status(500).json({
       error: error instanceof Error ? error.message : 'Unable to save participant',
     });
@@ -366,13 +556,15 @@ export async function handleCreateParticipant(req, res) {
 export async function handleGetEntries(_req, res) {
   try {
     const configuredEntries = await getConfiguredEntries();
+    const lossMessages = await getConfiguredLossMessages();
+    const lossTypes = await getConfiguredLossTypes();
     if (configuredEntries.length > 0) {
-      res.status(200).json({ entries: configuredEntries, source: 'admin' });
+      res.status(200).json({ entries: configuredEntries, lossMessages, lossTypes, source: 'admin' });
       return;
     }
 
     const defaultEntries = await loadDefaultEntriesFromFile();
-    res.status(200).json({ entries: defaultEntries, source: 'default' });
+    res.status(200).json({ entries: defaultEntries, lossMessages: {}, lossTypes: {}, source: 'default' });
   } catch (error) {
     res.status(500).json({
       error: error instanceof Error ? error.message : 'Unable to load wheel entries',
@@ -409,7 +601,9 @@ export async function handleGetAdminEntries(req, res) {
 
   try {
     const entries = await getCurrentEntriesForAdmin();
-    res.status(200).json({ entries });
+    const lossMessages = await getConfiguredLossMessages();
+    const lossTypes = await getConfiguredLossTypes();
+    res.status(200).json({ entries, lossMessages, lossTypes });
   } catch (error) {
     res.status(500).json({
       error: error instanceof Error ? error.message : 'Unable to load wheel entries',
@@ -434,6 +628,8 @@ export async function handleAddAdminEntry(req, res) {
   }
 
   const label = String(body?.label || '').trim();
+  const message = String(body?.message || '').trim();
+  const lossType = String(body?.lossType || 'loss').trim().toLowerCase();
   if (!label) {
     res.status(400).json({ error: 'Entry label is required.' });
     return;
@@ -441,9 +637,26 @@ export async function handleAddAdminEntry(req, res) {
 
   try {
     const entries = await getCurrentEntriesForAdmin();
-    entries.push(label);
-    const updatedEntries = await saveConfiguredEntries(entries);
-    res.status(201).json({ entries: updatedEntries });
+    const lossMessages = await getConfiguredLossMessages();
+    const lossTypes = await getConfiguredLossTypes();
+    const normalizedLabel = normalizeEntryLabel(label);
+    const existingIndex = entries.findIndex((entry) => normalizeEntryLabel(entry) === normalizedLabel);
+    if (existingIndex < 0) {
+      entries.push(label);
+    }
+    const nextLossMessages = { ...lossMessages };
+    const nextLossTypes = { ...lossTypes };
+    if (message) {
+      nextLossMessages[normalizedLabel] = message;
+    }
+    nextLossTypes[normalizedLabel] = lossType === 'free-spin' ? 'free-spin' : 'loss';
+    const updatedEntries = await saveConfiguredEntries(entries, nextLossMessages, nextLossTypes);
+    res.status(existingIndex < 0 ? 201 : 200).json({
+      entries: updatedEntries,
+      lossMessages: nextLossMessages,
+      lossTypes: nextLossTypes,
+      action: existingIndex < 0 ? 'created' : 'updated',
+    });
   } catch (error) {
     res.status(500).json({
       error: error instanceof Error ? error.message : 'Unable to add wheel entry',
@@ -475,14 +688,22 @@ export async function handleDeleteAdminEntry(req, res) {
 
   try {
     const entries = await getCurrentEntriesForAdmin();
+    const lossMessages = await getConfiguredLossMessages();
+    const lossTypes = await getConfiguredLossTypes();
     if (index >= entries.length) {
       res.status(404).json({ error: 'Wheel entry not found.' });
       return;
     }
 
+    const removedEntry = entries[index];
+    const normalizedRemovedEntry = normalizeEntryLabel(removedEntry);
     entries.splice(index, 1);
-    const updatedEntries = await saveConfiguredEntries(entries);
-    res.status(200).json({ entries: updatedEntries });
+    const nextLossMessages = { ...lossMessages };
+    const nextLossTypes = { ...lossTypes };
+    delete nextLossMessages[normalizedRemovedEntry];
+    delete nextLossTypes[normalizedRemovedEntry];
+    const updatedEntries = await saveConfiguredEntries(entries, nextLossMessages, nextLossTypes);
+    res.status(200).json({ entries: updatedEntries, lossMessages: nextLossMessages, lossTypes: nextLossTypes });
   } catch (error) {
     res.status(500).json({
       error: error instanceof Error ? error.message : 'Unable to remove wheel entry',
@@ -514,6 +735,8 @@ export async function handleReorderAdminEntries(req, res) {
 
   try {
     const entries = await getCurrentEntriesForAdmin();
+    const lossMessages = await getConfiguredLossMessages();
+    const lossTypes = await getConfiguredLossTypes();
      
     // Validate that the order contains the same entries
     if (order.length !== entries.length || !order.every(e => entries.includes(e))) {
@@ -521,8 +744,8 @@ export async function handleReorderAdminEntries(req, res) {
       return;
     }
 
-    const updatedEntries = await saveConfiguredEntries(order);
-    res.status(200).json({ entries: updatedEntries });
+    const updatedEntries = await saveConfiguredEntries(order, lossMessages, lossTypes);
+    res.status(200).json({ entries: updatedEntries, lossMessages, lossTypes });
   } catch (error) {
     res.status(500).json({
       error: error instanceof Error ? error.message : 'Unable to reorder wheel entries',

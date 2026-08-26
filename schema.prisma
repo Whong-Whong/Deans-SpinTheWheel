@@ -24,6 +24,9 @@ model PrizeConfig {
   maxWins     Int    @default(1)
   currentWins Int    @default(0)
   isEternal   Boolean @default(false)
+  isDisabled  Boolean @default(false)
+  lossMessage String  @default("")
+  lossType    String  @default("")
   updatedAt   DateTime @updatedAt
 
   @@map("prize_config")

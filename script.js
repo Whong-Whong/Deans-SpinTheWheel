@@ -19,6 +19,9 @@ const adminAccessButton = document.getElementById("adminAccessButton");
 const playerModal = document.getElementById("playerModal");
 const adminModal = document.getElementById("adminModal");
 const closeAdminModalButton = document.getElementById("closeAdminModalButton");
+const adminSectionTitle = document.getElementById("adminSectionTitle");
+const adminSectionSubtitle = document.getElementById("adminSectionSubtitle");
+const adminTabs = document.getElementById("adminTabs");
 const playerForm = document.getElementById("playerForm");
 const playerFormError = document.getElementById("playerFormError");
 const closeFormButton = document.getElementById("closeFormButton");
@@ -29,17 +32,45 @@ const exportLoginTools = document.getElementById("exportLoginTools");
 const exportTools = document.getElementById("exportTools");
 const exportAdminEmailInput = document.getElementById("exportAdminEmail");
 const exportAccessKeyInput = document.getElementById("exportAccessKey");
+const adminLoginError = document.getElementById("adminLoginError");
 const adminLoginButton = document.getElementById("adminLoginButton");
+const adminLossMessageInput = document.getElementById("adminLossMessageInput");
+const adminLossTypeSelect = document.getElementById("adminLossTypeSelect");
 const exportFromDateInput = document.getElementById("exportFromDate");
 const exportToDateInput = document.getElementById("exportToDate");
 const downloadExportButton = document.getElementById("downloadExportButton");
+const entriesFromDateInput = document.getElementById("entriesFromDate");
+const entriesToDateInput = document.getElementById("entriesToDate");
+const entriesDateSortSelect = document.getElementById("entriesDateSort");
+const downloadEntriesExportButton = document.getElementById("downloadEntriesExportButton");
+const entriesTableBody = document.getElementById("entriesTableBody");
+const entriesCountBadge = document.getElementById("entriesCountBadge");
+const entriesSummaryText = document.getElementById("entriesSummaryText");
+const statTotalPrizesValue = document.getElementById("statTotalPrizesValue");
+const statBigPrizesValue = document.getElementById("statBigPrizesValue");
+const statRegularPrizesValue = document.getElementById("statRegularPrizesValue");
 const adminEntryInput = document.getElementById("adminEntryInput");
 const addAdminEntryButton = document.getElementById("addAdminEntryButton");
 const adminEntriesList = document.getElementById("adminEntriesList");
+const milestoneSpinRows = document.getElementById("milestoneSpinRows");
+const addMilestoneSpinRowButton = document.getElementById("addMilestoneSpinRowButton");
+const saveMilestoneSpinScheduleButton = document.getElementById("saveMilestoneSpinScheduleButton");
+const regularPrizeRows = document.getElementById("regularPrizeRows");
+const addRegularPrizeRowButton = document.getElementById("addRegularPrizeRowButton");
+const saveRegularPrizeNamesButton = document.getElementById("saveRegularPrizeNamesButton");
 const resetPrizeWinsButton = document.getElementById("resetPrizeWinsButton");
+const spinCounterDateInput = document.getElementById("spinCounterDateInput");
+const loadSpinCounterButton = document.getElementById("loadSpinCounterButton");
+const spinCounterValueInput = document.getElementById("spinCounterValueInput");
+const saveSpinCounterButton = document.getElementById("saveSpinCounterButton");
+const spinCounterMetaText = document.getElementById("spinCounterMetaText");
+const wheelFieldsCountBadge = document.getElementById("wheelFieldsCountBadge");
 const prizeSearchInput = document.getElementById("prizeSearchInput");
 const prizeSortSelect = document.getElementById("prizeSortSelect");
 const wheelSection = document.querySelector(".wheel-section");
+const sidebarItems = [...document.querySelectorAll(".sidebar-item")];
+const adminTabButtons = [...document.querySelectorAll(".admin-tab-btn")];
+const adminTabContents = [...document.querySelectorAll(".admin-tab-content")];
 
 const siteUrl = (import.meta?.env?.VITE_SITE_URL || import.meta?.env?.NEXT_PUBLIC_SITE_URL || window.location.origin);
 const adminLoginApiUrl = new URL("/api/admin/login", siteUrl).toString();
@@ -47,8 +78,13 @@ const publicEntriesApiUrl = new URL("/api/entries", siteUrl).toString();
 const adminEntriesApiUrl = new URL("/api/admin/entries", siteUrl).toString();
 const adminPrizeConfigApiUrl = new URL("/api/admin/prize-config", siteUrl).toString();
 const publicPrizeConfigApiUrl = new URL("/api/prize-config", siteUrl).toString();
+const adminMilestoneConfigApiUrl = new URL("/api/admin/milestone-config", siteUrl).toString();
+const publicMilestoneConfigApiUrl = new URL("/api/milestone-config", siteUrl).toString();
+const adminRegularPrizeConfigApiUrl = new URL("/api/admin/regular-prize-config", siteUrl).toString();
+const publicRegularPrizeConfigApiUrl = new URL("/api/regular-prize-config", siteUrl).toString();
 const adminPrizeWinApiUrl = new URL("/api/admin/prize-win", siteUrl).toString();
 const adminResetPrizeWinsApiUrl = new URL("/api/admin/reset-prize-wins", siteUrl).toString();
+const adminSpinCounterApiUrl = new URL("/api/admin/spin-counter", siteUrl).toString();
 const participantsApiUrl = new URL("/api/participants", siteUrl).toString();
 const spinResultsApiUrl = new URL("/api/winners", siteUrl).toString();
 const spinCounterNextApiUrl = new URL("/api/spin-counter/next", siteUrl).toString();
@@ -56,17 +92,7 @@ const spinCounterNextFallbackApiUrl = new URL("/api/spin-counter-next", siteUrl)
 const spinCounterFlatApiUrl = new URL("/api/spin-counter", siteUrl).toString();
 const participantsExportApiUrl = new URL("/api/participants/export", siteUrl).toString();
 const storageKey = "spin-wheel-state-v1";
-const nonRemovablePrizes = new Set([
-  "so close",
-  "better luck next time",
-  "almost",
-  "free spin",
-  "oops",
-  "not today",
-  "no prize this time",
-  "troos prys",
-]);
-
+const regularSpinLossChance = 0.75;
 const colors = [
   "#f43f5e",
   "#fb7185",
@@ -111,6 +137,12 @@ function setExportToolsVisibility(isLoggedIn) {
   exportLoginTools.hidden = isLoggedIn;
 }
 
+function setAdminLoginError(message = "") {
+  if (adminLoginError) {
+    adminLoginError.textContent = message;
+  }
+}
+
 function getAdminRequestHeaders() {
   if (!exportAdminSession) {
     return null;
@@ -123,39 +155,131 @@ function getAdminRequestHeaders() {
 }
 
 function openAdminModal() {
+  setAdminLoginError("");
   adminModal.classList.add("is-visible");
   adminModal.setAttribute("aria-hidden", "false");
+  document.body.style.overflow = "hidden";
 }
 
 function closeAdminModal() {
   adminModal.classList.remove("is-visible");
   adminModal.setAttribute("aria-hidden", "true");
+  document.body.style.overflow = "";
 }
 
-const milestoneSpinSchedule = Object.freeze({
-  20: "Pilot",
-  50: "Phillips Kettle",
-  70: "Bantex",
-  100: "Fila",
-  120: "Stationery Hamper",
-  150: "Tower",
-  170: "Rexel",
-  200: "Parrot",
-  230: "Russel Hobbs Hamper",
-  270: "Stationery Hamper",
-  300: "Russel Hobbs Hamper",
-});
-const milestonePrizeNames = Object.freeze([...new Set(Object.values(milestoneSpinSchedule))]);
-const regularSpinPrizeNames = Object.freeze(["Troos Prys", "Pilot Juice Pen"]);
+function setActiveSidebarSection(sectionName) {
+  sidebarItems.forEach((item) => {
+    item.classList.toggle("is-active", item.dataset.adminSection === sectionName);
+  });
+}
+
+function activateAdminTab(tabName) {
+  adminTabButtons.forEach((button) => {
+    button.classList.toggle("active", button.dataset.tab === tabName);
+  });
+  adminTabContents.forEach((content) => {
+    content.classList.toggle("active", content.id === `${tabName}-tab`);
+  });
+}
+
+function setAdminSection(sectionName) {
+  if (sectionName === "entries") {
+    adminTabs?.classList.add("is-hidden");
+    activateAdminTab("export");
+    if (adminSectionTitle) {
+      adminSectionTitle.textContent = "Entries";
+    }
+    if (adminSectionSubtitle) {
+      adminSectionSubtitle.textContent = "View all registrations, sort by date, and export to Excel.";
+    }
+    setActiveSidebarSection("entries");
+    return;
+  }
+
+  adminTabs?.classList.remove("is-hidden");
+  if (!adminTabButtons.some((button) => button.classList.contains("active"))) {
+    activateAdminTab("prizes");
+  }
+  if (adminSectionTitle) {
+    adminSectionTitle.textContent = "Prize Settings";
+  }
+  if (adminSectionSubtitle) {
+    adminSectionSubtitle.textContent = "Manage the prizes and odds for your wheel.";
+  }
+  setActiveSidebarSection("prizes");
+}
+
+let milestoneSpinSchedule = {};
+let regularSpinPrizeNames = [];
+let lossMessages = {};
+let lossTypes = {};
+
+function getTodayDateKey() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function normalizeDateKey(value) {
+  const dateKey = String(value || "").trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(dateKey) ? dateKey : "";
+}
+
+function getMilestonePrizeNames() {
+  return [...new Set(Object.values(milestoneSpinSchedule))].filter(Boolean);
+}
+
+function updatePrizeStats() {
+  const totalPrizes = normalizeEntries(allEntries, true).length;
+  const bigPrizes = getMilestonePrizeNames().length;
+  const regularPrizes = normalizeRegularPrizeNames(regularSpinPrizeNames).length;
+
+  if (statTotalPrizesValue) {
+    statTotalPrizesValue.textContent = String(totalPrizes);
+  }
+  if (statBigPrizesValue) {
+    statBigPrizesValue.textContent = String(bigPrizes);
+  }
+  if (statRegularPrizesValue) {
+    statRegularPrizesValue.textContent = String(regularPrizes);
+  }
+}
 
 function isMilestonePrize(prize) {
   const normalizedPrize = normalizeLabel(prize);
-  return milestonePrizeNames.some((milestonePrize) => {
+  return getMilestonePrizeNames().some((milestonePrize) => {
     const normalizedMilestone = normalizeLabel(milestonePrize);
     return normalizedPrize === normalizedMilestone
       || normalizedPrize.includes(normalizedMilestone)
       || normalizedMilestone.includes(normalizedPrize);
   });
+}
+
+function normalizeRegularPrizeNames(prizes) {
+  if (!Array.isArray(prizes)) {
+    return [];
+  }
+
+  return [...new Set(
+    prizes
+      .map((prize) => String(prize || "").trim())
+      .filter(Boolean)
+  )];
+}
+
+function parseRegularPrizeNamesInput(value) {
+  return normalizeRegularPrizeNames(
+    String(value || "")
+      .split(",")
+      .map((part) => part.trim())
+      .filter(Boolean)
+  );
+}
+
+function formatRegularPrizeNamesForInput(prizes) {
+  return normalizeRegularPrizeNames(prizes).join(", ");
 }
 
 function isRegularSpinPrize(prize) {
@@ -168,12 +292,339 @@ function isRegularSpinPrize(prize) {
   });
 }
 
+function getPrizeConfigForEntry(prize) {
+  return prizeConfigurations[normalizeLabel(prize)] || null;
+}
+
+function getLossMessageForEntry(prize) {
+  const normalizedPrize = normalizeLabel(prize);
+  const configuredMessage = String(getPrizeConfigForEntry(prize)?.lossMessage || "").trim();
+  if (configuredMessage) {
+    return configuredMessage;
+  }
+  return String(lossMessages[normalizedPrize] || "").trim();
+}
+
+function getLossTypeForEntry(prize) {
+  const normalizedPrize = normalizeLabel(prize);
+  const configuredType = String(getPrizeConfigForEntry(prize)?.lossType || "").trim().toLowerCase();
+  if (configuredType === "loss" || configuredType === "free-spin") {
+    return configuredType;
+  }
+  const mappedType = String(lossTypes[normalizedPrize] || "").trim().toLowerCase();
+  return mappedType === "free-spin" ? "free-spin" : (mappedType === "loss" ? "loss" : "");
+}
+
+function isLossEntry(prize) {
+  return Boolean(getLossTypeForEntry(prize)) || (!isMilestonePrize(prize) && !isRegularSpinPrize(prize));
+}
+
+function isFreeSpinEntry(prize) {
+  return getLossTypeForEntry(prize) === "free-spin";
+}
+
+function normalizeMilestoneSchedule(schedule) {
+  if (!schedule || typeof schedule !== "object") {
+    return {};
+  }
+
+  const normalized = {};
+  Object.entries(schedule).forEach(([spinNumber, prizeName]) => {
+    const numericSpinNumber = Number(spinNumber);
+    const cleanedPrizeName = String(prizeName || "").trim();
+    if (!Number.isInteger(numericSpinNumber) || numericSpinNumber <= 0 || !cleanedPrizeName) {
+      return;
+    }
+    normalized[String(numericSpinNumber)] = cleanedPrizeName;
+  });
+
+  return normalized;
+}
+
+function parseMilestoneScheduleInput(value) {
+  const schedule = {};
+  const entries = String(value || "")
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  entries.forEach((entry) => {
+    const [spinText, ...prizeParts] = entry.split("=");
+    const spinNumber = Number(String(spinText || "").trim());
+    const prizeName = prizeParts.join("=").trim();
+
+    if (!Number.isInteger(spinNumber) || spinNumber <= 0 || !prizeName) {
+      return;
+    }
+
+    schedule[String(spinNumber)] = prizeName;
+  });
+
+  return normalizeMilestoneSchedule(schedule);
+}
+
+function formatMilestoneScheduleForInput(schedule) {
+  return Object.entries(normalizeMilestoneSchedule(schedule))
+    .sort(([left], [right]) => Number(left) - Number(right))
+    .map(([spinNumber, prizeName]) => `${spinNumber}=${prizeName}`)
+    .join(", ");
+}
+
+function createMilestoneRow(spinNumber = "", prizeName = "") {
+  const row = document.createElement("div");
+  row.className = "milestone-spin-row";
+
+  const spinField = document.createElement("div");
+  spinField.className = "milestone-spin-field";
+  const spinLabel = document.createElement("label");
+  spinLabel.textContent = "Spin";
+  const spinInput = document.createElement("input");
+  spinInput.type = "number";
+  spinInput.min = "1";
+  spinInput.step = "1";
+  spinInput.className = "milestone-spin-number";
+  spinInput.placeholder = "20";
+  spinInput.value = spinNumber;
+  spinField.append(spinLabel, spinInput);
+
+  const prizeField = document.createElement("div");
+  prizeField.className = "milestone-spin-field";
+  const prizeLabel = document.createElement("label");
+  prizeLabel.textContent = "Prize";
+  const prizeInput = document.createElement("input");
+  prizeInput.type = "text";
+  prizeInput.className = "milestone-spin-prize";
+  prizeInput.placeholder = "Pilot";
+  prizeInput.value = prizeName;
+  prizeField.append(prizeLabel, prizeInput);
+
+  row.append(spinField, prizeField);
+  return row;
+}
+
+function renderMilestoneSpinRows(schedule) {
+  if (!milestoneSpinRows) {
+    return;
+  }
+
+  milestoneSpinRows.innerHTML = "";
+  const entries = Object.entries(normalizeMilestoneSchedule(schedule)).sort(([left], [right]) => Number(left) - Number(right));
+
+  if (entries.length === 0) {
+    milestoneSpinRows.appendChild(createMilestoneRow());
+    return;
+  }
+
+  entries.forEach(([spinNumber, prizeName]) => {
+    milestoneSpinRows.appendChild(createMilestoneRow(spinNumber, prizeName));
+  });
+
+  milestoneSpinRows.appendChild(createMilestoneRow());
+}
+
+function collectMilestoneRows() {
+  if (!milestoneSpinRows) {
+    return {};
+  }
+
+  const schedule = {};
+  const rowElements = [...milestoneSpinRows.querySelectorAll(".milestone-spin-row")];
+
+  rowElements.forEach((row) => {
+    const spinInput = row.querySelector(".milestone-spin-number");
+    const prizeInput = row.querySelector(".milestone-spin-prize");
+    const spinNumber = Number(String(spinInput?.value || "").trim());
+    const prizeName = String(prizeInput?.value || "").trim();
+
+    if (!Number.isInteger(spinNumber) || spinNumber <= 0 || !prizeName) {
+      return;
+    }
+
+    schedule[String(spinNumber)] = prizeName;
+  });
+
+  return normalizeMilestoneSchedule(schedule);
+}
+
+function createRegularPrizeRow(prizeName = "") {
+  const row = document.createElement("div");
+  row.className = "regular-prize-row";
+
+  const prizeInput = document.createElement("input");
+  prizeInput.type = "text";
+  prizeInput.className = "regular-prize-input";
+  prizeInput.placeholder = "Prize name";
+  prizeInput.value = prizeName;
+
+  row.append(prizeInput);
+  return row;
+}
+
+function renderRegularPrizeRows(names) {
+  if (!regularPrizeRows) {
+    return;
+  }
+
+  regularPrizeRows.innerHTML = "";
+  const cleanedNames = normalizeRegularPrizeNames(names);
+
+  if (cleanedNames.length === 0) {
+    regularPrizeRows.appendChild(createRegularPrizeRow());
+    return;
+  }
+
+  cleanedNames.forEach((name) => {
+    regularPrizeRows.appendChild(createRegularPrizeRow(name));
+  });
+
+  regularPrizeRows.appendChild(createRegularPrizeRow());
+}
+
+function collectRegularPrizeRows() {
+  if (!regularPrizeRows) {
+    return [];
+  }
+
+  return normalizeRegularPrizeNames(
+    [...regularPrizeRows.querySelectorAll(".regular-prize-input")]
+      .map((input) => input.value)
+      .filter((value) => value && value.trim())
+  );
+}
+
+async function persistEntriesOrder(nextEntries) {
+  const headers = getAdminRequestHeaders();
+  if (!headers) {
+    return normalizeEntries(nextEntries, true);
+  }
+
+  const response = await fetch(adminEntriesApiUrl, {
+    method: "PUT",
+    cache: "no-store",
+    headers: {
+      ...headers,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ order: nextEntries }),
+  });
+
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.error || `Request failed (${response.status})`);
+  }
+
+  const payload = await response.json();
+  return normalizeEntries(payload.entries, true);
+}
+
+async function syncRegularPrizeEntries(nextNames, options = {}) {
+  const { persist = false } = options;
+  const normalizedNext = normalizeRegularPrizeNames(nextNames);
+  const previousRegularNames = new Set(regularSpinPrizeNames.map((entry) => normalizeLabel(entry)).filter(Boolean));
+  const nextRegularNames = new Set(normalizedNext.map((entry) => normalizeLabel(entry)).filter(Boolean));
+  const retainedEntries = normalizeEntries(allEntries, true).filter((entry) => {
+    const normalized = normalizeLabel(entry);
+    if (!normalized) {
+      return false;
+    }
+    if (!previousRegularNames.has(normalized)) {
+      return true;
+    }
+    return nextRegularNames.has(normalized);
+  });
+  const nextEntries = [...retainedEntries];
+  normalizedNext.forEach((entry) => {
+    const normalized = normalizeLabel(entry);
+    if (!normalized || nextEntries.some((currentEntry) => normalizeLabel(currentEntry) === normalized)) {
+      return;
+    }
+    nextEntries.push(entry);
+  });
+
+  const uniqueEntries = [];
+  const seen = new Set();
+  nextEntries.forEach((entry) => {
+    const label = normalizeLabel(entry);
+    if (!label || seen.has(label)) {
+      return;
+    }
+    seen.add(label);
+    uniqueEntries.push(entry);
+  });
+
+  allEntries = normalizeEntries(uniqueEntries, true);
+  regularSpinPrizeNames = normalizedNext;
+
+  if (persist) {
+    allEntries = await persistEntriesOrder(allEntries);
+  }
+
+  renderAdminEntries(allEntries);
+  applyEntriesUpdate(allEntries);
+}
+
+async function syncMilestonePrizeEntries(nextSchedule, options = {}) {
+  const { persist = false } = options;
+  const previousSchedule = normalizeMilestoneSchedule(milestoneSpinSchedule || {});
+  const normalizedSchedule = normalizeMilestoneSchedule(nextSchedule);
+  const nextEntries = normalizeEntries(allEntries, true);
+  const nextNames = [...new Set(Object.values(normalizedSchedule).filter(Boolean))];
+  const previousNamesBySpin = new Map(Object.entries(previousSchedule));
+  const nextNamesBySpin = new Map(Object.entries(normalizedSchedule));
+  const removedMilestoneLabels = [];
+
+  previousNamesBySpin.forEach((previousPrizeName, spinNumber) => {
+    const nextPrizeName = nextNamesBySpin.get(spinNumber);
+    const normalizedPrevious = normalizeLabel(previousPrizeName);
+    const normalizedNext = normalizeLabel(nextPrizeName || "");
+    if (normalizedPrevious && normalizedPrevious !== normalizedNext) {
+      removedMilestoneLabels.push(normalizedPrevious);
+    }
+  });
+
+  removedMilestoneLabels.forEach((normalizedLabelToRemove) => {
+    const entryIndex = nextEntries.findIndex((entry) => normalizeLabel(entry) === normalizedLabelToRemove);
+    if (entryIndex >= 0) {
+      nextEntries.splice(entryIndex, 1);
+    }
+  });
+
+  nextNames.forEach((entry) => {
+    const normalized = normalizeLabel(entry);
+    if (!normalized || nextEntries.some((currentEntry) => normalizeLabel(currentEntry) === normalized)) {
+      return;
+    }
+    nextEntries.push(entry);
+  });
+
+  const uniqueEntries = [];
+  const seen = new Set();
+  nextEntries.forEach((entry) => {
+    const label = normalizeLabel(entry);
+    if (!label || seen.has(label)) {
+      return;
+    }
+    seen.add(label);
+    uniqueEntries.push(entry);
+  });
+
+  allEntries = normalizeEntries(uniqueEntries, true);
+  milestoneSpinSchedule = normalizedSchedule;
+
+  if (persist) {
+    allEntries = await persistEntriesOrder(allEntries);
+  }
+
+  renderAdminEntries(allEntries);
+  applyEntriesUpdate(allEntries);
+}
+
 function getMilestonePrizeForSpin(spinNumber) {
   if (spinNumber <= 0) {
     return null;
   }
 
-  return milestoneSpinSchedule[spinNumber] || null;
+  return milestoneSpinSchedule[String(spinNumber)] || null;
 }
 
 function findEntryInWheel(targetLabel) {
@@ -215,45 +666,104 @@ function normalizeLabel(value) {
     .trim();
 }
 
-function getLoseKey(value) {
-  const label = normalizeLabel(value);
-  if (label === "so close") {
-    return "so close";
+function normalizeLossMessages(messages) {
+  if (!messages || typeof messages !== "object" || Array.isArray(messages)) {
+    return {};
   }
-  if (label === "better luck next time") {
-    return "better luck next time";
+
+  return Object.entries(messages).reduce((acc, [label, message]) => {
+    const normalizedLabel = normalizeLabel(label);
+    const cleanedMessage = String(message || "").trim();
+    if (normalizedLabel && cleanedMessage) {
+      acc[normalizedLabel] = cleanedMessage;
+    }
+    return acc;
+  }, {});
+}
+
+function normalizeLossTypes(types) {
+  if (!types || typeof types !== "object" || Array.isArray(types)) {
+    return {};
   }
-  if (label === "almost") {
-    return "almost";
+
+  return Object.entries(types).reduce((acc, [label, type]) => {
+    const normalizedLabel = normalizeLabel(label);
+    const cleanedType = String(type || "").trim().toLowerCase();
+    if (normalizedLabel && (cleanedType === "loss" || cleanedType === "free-spin")) {
+      acc[normalizedLabel] = cleanedType;
+    }
+    return acc;
+  }, {});
+}
+
+function deriveLossMetadataFromPrizeConfigs(prizeConfigs) {
+  const nextMessages = {};
+  const nextTypes = {};
+  if (!Array.isArray(prizeConfigs)) {
+    return { lossMessages: nextMessages, lossTypes: nextTypes };
   }
-  if (label === "free spin") {
-    return "free spin";
+
+  prizeConfigs.forEach((config) => {
+    const normalizedLabel = normalizeLabel(config?.prizeName || "");
+    if (!normalizedLabel) {
+      return;
+    }
+    const message = String(config?.lossMessage || "").trim();
+    const type = String(config?.lossType || "").trim().toLowerCase();
+    if (message) {
+      nextMessages[normalizedLabel] = message;
+    }
+    if (type === "loss" || type === "free-spin") {
+      nextTypes[normalizedLabel] = type;
+    }
+  });
+
+  return { lossMessages: nextMessages, lossTypes: nextTypes };
+}
+
+function syncLossMetadataFromPayload(payload) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return;
   }
-  if (label === "oops") {
-    return "oops";
+
+  const hasLossMessages = Object.prototype.hasOwnProperty.call(payload, "lossMessages")
+    || Object.prototype.hasOwnProperty.call(payload, "messages");
+  const hasLossTypes = Object.prototype.hasOwnProperty.call(payload, "lossTypes")
+    || Object.prototype.hasOwnProperty.call(payload, "types");
+
+  const payloadLossMessages = hasLossMessages
+    ? normalizeLossMessages(payload.lossMessages || payload.messages || {})
+    : null;
+  const payloadLossTypes = hasLossTypes
+    ? normalizeLossTypes(payload.lossTypes || payload.types || {})
+    : null;
+
+  const derived = deriveLossMetadataFromPrizeConfigs(payload.prizeConfigs);
+
+  if (payloadLossMessages) {
+    lossMessages = { ...derived.lossMessages, ...payloadLossMessages };
+  } else if (Object.keys(derived.lossMessages).length > 0) {
+    lossMessages = derived.lossMessages;
   }
-  if (label === "not today") {
-    return "not today";
+
+  if (payloadLossTypes) {
+    lossTypes = { ...derived.lossTypes, ...payloadLossTypes };
+  } else if (Object.keys(derived.lossTypes).length > 0) {
+    lossTypes = derived.lossTypes;
   }
-  if (label === "uh oh") {
-    return "uh oh";
+}
+
+function formatLossHeadline(value) {
+  const cleaned = String(value || "").trim();
+  if (!cleaned) {
+    return "LOSS!";
   }
-  if (label === "maybe next time") {
-    return "maybe next time";
-  }
-  if (label === "nice try") {
-    return "nice try";
-  }
-  if (label === "404 prize not found") {
-    return "404: prize not found";
-  }
-  if (label === "close but no prize") {
-    return "close, but no prize";
-  }
-  if (label === "no prize this time") {
-    return "no prize this time";
-  }
-  return null;
+
+  return `${cleaned
+    .replace(/\s+/g, " ")
+    .split(" ")
+    .map((word) => word ? `${word.charAt(0).toUpperCase()}${word.slice(1)}` : "")
+    .join(" ")}!`;
 }
 
 function normalizeEntries(list, allowEmpty = false) {
@@ -311,8 +821,123 @@ function normalizeParticipants(list) {
   return list.map(normalizeParticipant).filter(Boolean);
 }
 
-function renderRegisteredPlayers() {
-  return;
+function getDateKeyFromIso(value) {
+  const date = new Date(String(value || "").trim());
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  return date.toISOString().slice(0, 10);
+}
+
+function formatSubmittedAt(value) {
+  const date = new Date(String(value || "").trim());
+  if (Number.isNaN(date.getTime())) {
+    return String(value || "").trim() || "—";
+  }
+
+  return date.toLocaleString();
+}
+
+function getParticipantsDateBounds(participants = []) {
+  const dateKeys = participants
+    .map((participant) => getDateKeyFromIso(participant.submittedAt))
+    .filter(Boolean)
+    .sort();
+
+  if (dateKeys.length === 0) {
+    return null;
+  }
+
+  return { fromDate: dateKeys[0], toDate: dateKeys[dateKeys.length - 1] };
+}
+
+function getEntriesFilters() {
+  const fromDate = normalizeDateKey(entriesFromDateInput?.value);
+  const toDate = normalizeDateKey(entriesToDateInput?.value);
+  const sortOrder = entriesDateSortSelect?.value === "oldest" ? "oldest" : "newest";
+  return { fromDate, toDate, sortOrder };
+}
+
+function getFilteredParticipants({ fromDate, toDate, sortOrder }) {
+  const participants = normalizeParticipants(state.participants);
+  const filteredParticipants = participants.filter((participant) => {
+    const dateKey = getDateKeyFromIso(participant.submittedAt);
+    if (!dateKey) {
+      return false;
+    }
+    if (fromDate && dateKey < fromDate) {
+      return false;
+    }
+    if (toDate && dateKey > toDate) {
+      return false;
+    }
+    return true;
+  });
+
+  filteredParticipants.sort((left, right) => {
+    const leftTime = new Date(left.submittedAt).getTime();
+    const rightTime = new Date(right.submittedAt).getTime();
+    if (sortOrder === "oldest") {
+      return leftTime - rightTime;
+    }
+    return rightTime - leftTime;
+  });
+
+  return filteredParticipants;
+}
+
+function renderEntriesTable() {
+  if (!entriesTableBody || !entriesSummaryText || !entriesCountBadge) {
+    return;
+  }
+
+  if (!exportAdminSession) {
+    entriesTableBody.innerHTML = "";
+    entriesSummaryText.textContent = "Sign in as admin to view entries.";
+    entriesCountBadge.textContent = "0 entries";
+    return;
+  }
+
+  const { fromDate, toDate, sortOrder } = getEntriesFilters();
+  if (fromDate && toDate && fromDate > toDate) {
+    entriesTableBody.innerHTML = "";
+    entriesSummaryText.textContent = "From date must be before or equal to To date.";
+    entriesCountBadge.textContent = "0 entries";
+    return;
+  }
+
+  const filteredParticipants = getFilteredParticipants({ fromDate, toDate, sortOrder });
+  entriesTableBody.innerHTML = "";
+
+  if (filteredParticipants.length === 0) {
+    const row = document.createElement("tr");
+    const cell = document.createElement("td");
+    cell.colSpan = 4;
+    cell.textContent = "No entries found for the selected date filter.";
+    row.appendChild(cell);
+    entriesTableBody.appendChild(row);
+  } else {
+    filteredParticipants.forEach((participant) => {
+      const row = document.createElement("tr");
+      const nameCell = document.createElement("td");
+      const schoolCell = document.createElement("td");
+      const emailCell = document.createElement("td");
+      const submittedAtCell = document.createElement("td");
+      nameCell.textContent = participant.fullName || participant.name || "—";
+      schoolCell.textContent = participant.school || "—";
+      emailCell.textContent = participant.email || "—";
+      submittedAtCell.textContent = formatSubmittedAt(participant.submittedAt);
+      row.append(nameCell, schoolCell, emailCell, submittedAtCell);
+      entriesTableBody.appendChild(row);
+    });
+  }
+
+  entriesCountBadge.textContent = `${filteredParticipants.length} ${filteredParticipants.length === 1 ? "entry" : "entries"}`;
+  const rangeText = fromDate || toDate
+    ? `Filtered by ${fromDate || "start"} to ${toDate || "today"}`
+    : "Showing all dates";
+  entriesSummaryText.textContent = `${rangeText} • Sorted ${sortOrder === "oldest" ? "oldest first" : "newest first"}.`;
 }
 
 async function loadParticipantsFromServer() {
@@ -325,6 +950,7 @@ async function loadParticipantsFromServer() {
     const participants = normalizeParticipants(await response.json());
     state.participants = participants;
     saveState();
+    renderEntriesTable();
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
     console.warn(`Could not load participants from server (${message}).`);
@@ -352,14 +978,19 @@ async function saveParticipantToServer(participant) {
   return normalizeParticipant(await response.json());
 }
 
-async function downloadParticipantsExport() {
+async function downloadParticipantsExport(options = {}) {
+  const fromInput = options.fromInput || exportFromDateInput;
+  const toInput = options.toInput || exportToDateInput;
+  const downloadButton = options.button || downloadExportButton;
+  const sourceLabel = options.sourceLabel || "registrations";
+
   if (!exportAdminSession) {
     resultText.textContent = "Admin login is required before downloading registrations.";
     return;
   }
 
-  const fromDate = exportFromDateInput.value;
-  const toDate = exportToDateInput.value;
+  const fromDate = normalizeDateKey(fromInput?.value);
+  const toDate = normalizeDateKey(toInput?.value);
 
   if (!fromDate || !toDate) {
     resultText.textContent = "Select both From and To dates before downloading.";
@@ -371,9 +1002,11 @@ async function downloadParticipantsExport() {
     return;
   }
 
-  const originalButtonText = downloadExportButton.textContent;
-  downloadExportButton.disabled = true;
-  downloadExportButton.textContent = "Preparing Excel...";
+  const originalButtonText = downloadButton?.textContent || "Download Excel";
+  if (downloadButton) {
+    downloadButton.disabled = true;
+    downloadButton.textContent = "Preparing Excel...";
+  }
 
   try {
     const url = new URL(participantsExportApiUrl);
@@ -404,14 +1037,47 @@ async function downloadParticipantsExport() {
     link.click();
     link.remove();
     URL.revokeObjectURL(downloadUrl);
-    resultText.textContent = `Downloaded registrations from ${fromDate} to ${toDate}.`;
+    resultText.textContent = `Downloaded ${sourceLabel} from ${fromDate} to ${toDate}.`;
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
     resultText.textContent = `Could not download registrations (${message}).`;
   } finally {
-    downloadExportButton.disabled = false;
-    downloadExportButton.textContent = originalButtonText;
+    if (downloadButton) {
+      downloadButton.disabled = false;
+      downloadButton.textContent = originalButtonText;
+    }
   }
+}
+
+async function downloadEntriesExport() {
+  if (!exportAdminSession) {
+    resultText.textContent = "Admin login is required before downloading entries.";
+    return;
+  }
+
+  if (!entriesFromDateInput || !entriesToDateInput) {
+    resultText.textContent = "Entries date fields are not available.";
+    return;
+  }
+
+  const fromDate = normalizeDateKey(entriesFromDateInput.value);
+  const toDate = normalizeDateKey(entriesToDateInput.value);
+  if (!fromDate || !toDate) {
+    const bounds = getParticipantsDateBounds(normalizeParticipants(state.participants));
+    if (!bounds) {
+      resultText.textContent = "No entries available to export.";
+      return;
+    }
+    entriesFromDateInput.value = bounds.fromDate;
+    entriesToDateInput.value = bounds.toDate;
+  }
+
+  await downloadParticipantsExport({
+    fromInput: entriesFromDateInput,
+    toInput: entriesToDateInput,
+    button: downloadEntriesExportButton,
+    sourceLabel: "entries",
+  });
 }
 
 async function handleAdminLogin() {
@@ -419,10 +1085,11 @@ async function handleAdminLogin() {
   const accessKey = exportAccessKeyInput.value.trim();
 
   if (!email || !accessKey) {
-    resultText.textContent = "Enter admin email and access key to login.";
+    setAdminLoginError("Enter your email and access key to log in.");
     return;
   }
 
+  setAdminLoginError("");
   adminLoginButton.disabled = true;
   const originalText = adminLoginButton.textContent;
   adminLoginButton.textContent = "Logging in...";
@@ -447,17 +1114,133 @@ async function handleAdminLogin() {
     exportAdminSession = { email, accessKey };
     setExportToolsVisibility(true);
     exportAccessKeyInput.value = "";
+    setAdminLoginError("");
     await loadAdminEntries();
     await loadPrizeConfigurations();
-    resultText.textContent = "Admin login successful. You can now download registrations.";
+    await loadMilestoneSchedule();
+    await loadRegularPrizeNames();
+    await loadAdminSpinCounter({ announceResult: false });
+    renderEntriesTable();
+    resultText.textContent = "Admin login successful.";
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
+    const loginMessage = message === "Invalid admin credentials."
+      ? "Incorrect email or access key."
+      : message;
+    setAdminLoginError(loginMessage);
     resultText.textContent = `Admin login failed (${message}).`;
   } finally {
     adminLoginButton.disabled = false;
     adminLoginButton.textContent = originalText;
   }
 }
+
+async function loadAdminSpinCounter({ dateKey, announceResult = true } = {}) {
+    const headers = getAdminRequestHeaders();
+    if (!headers) {
+      if (announceResult) {
+        resultText.textContent = "Admin login is required before viewing spin counters.";
+      }
+      return;
+    }
+
+    const chosenDateKey = normalizeDateKey(dateKey)
+      || normalizeDateKey(spinCounterDateInput?.value)
+      || getTodayDateKey();
+    const url = new URL(adminSpinCounterApiUrl);
+    url.searchParams.set("dateKey", chosenDateKey);
+
+    try {
+      const response = await fetch(url.toString(), {
+        cache: "no-store",
+        headers,
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.error || `Request failed (${response.status})`);
+      }
+
+      const payload = await response.json();
+      const spinDateKey = normalizeDateKey(payload.spinDateKey) || chosenDateKey;
+      const spinNumber = Number(payload.spinNumber);
+      if (!Number.isInteger(spinNumber) || spinNumber < 0) {
+        throw new Error("Server returned an invalid counter value.");
+      }
+
+      if (spinCounterDateInput) {
+        spinCounterDateInput.value = spinDateKey;
+      }
+      if (spinCounterValueInput) {
+        spinCounterValueInput.value = String(spinNumber);
+      }
+      if (spinCounterMetaText) {
+        spinCounterMetaText.textContent = payload.exists
+          ? `Counter for ${spinDateKey}: ${spinNumber} spin(s).`
+          : `No counter exists yet for ${spinDateKey}. Current value is 0 until you save.`;
+      }
+      if (announceResult) {
+        resultText.textContent = `Loaded counter for ${spinDateKey}.`;
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      resultText.textContent = `Could not load spin counter (${message}).`;
+    }
+  }
+
+async function saveAdminSpinCounter() {
+    const headers = getAdminRequestHeaders();
+    if (!headers) {
+      resultText.textContent = "Admin login is required before editing spin counters.";
+      return;
+    }
+
+    const spinDateKey = normalizeDateKey(spinCounterDateInput?.value) || getTodayDateKey();
+    const spinNumber = Number(spinCounterValueInput?.value);
+    if (!Number.isInteger(spinNumber) || spinNumber < 0) {
+      resultText.textContent = "Enter a whole number greater than or equal to 0 for the counter.";
+      return;
+    }
+
+    const originalButtonText = saveSpinCounterButton?.textContent || "Save counter";
+    if (saveSpinCounterButton) {
+      saveSpinCounterButton.disabled = true;
+      saveSpinCounterButton.textContent = "Saving...";
+    }
+
+    try {
+      const response = await fetch(adminSpinCounterApiUrl, {
+        method: "POST",
+        cache: "no-store",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ dateKey: spinDateKey, spinNumber }),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.error || `Request failed (${response.status})`);
+      }
+
+      const payload = await response.json();
+      const savedDateKey = normalizeDateKey(payload.spinDateKey) || spinDateKey;
+      if (spinCounterDateInput) {
+        spinCounterDateInput.value = savedDateKey;
+      }
+      if (spinCounterValueInput) {
+        spinCounterValueInput.value = String(spinNumber);
+      }
+      if (spinCounterMetaText) {
+        spinCounterMetaText.textContent = `Counter for ${savedDateKey}: ${spinNumber} spin(s).`;
+      }
+      resultText.textContent = `Saved counter for ${savedDateKey}.`;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      resultText.textContent = `Could not save spin counter (${message}).`;
+    } finally {
+      if (saveSpinCounterButton) {
+        saveSpinCounterButton.disabled = false;
+        saveSpinCounterButton.textContent = originalButtonText;
+      }
+    }
+  }
 
 function createCounts(values) {
   const counts = new Map();
@@ -495,8 +1278,11 @@ function reconcileAvailableEntries(currentAvailable, sourceEntries) {
 
 function applyEntriesUpdate(newEntries) {
   allEntries = normalizeEntries(newEntries, true);
+  const configuredEntries = getConfiguredWheelEntries(allEntries);
   const currentAvailable = normalizeEntries(state.availableEntries, true);
-  entries = reconcileAvailableEntries(currentAvailable, allEntries);
+  entries = Object.keys(prizeConfigurations).length > 0
+    ? configuredEntries
+    : reconcileAvailableEntries(currentAvailable, configuredEntries);
   state.initialized = true;
   state.availableEntries = [...entries];
   state.currentRotation = currentRotation;
@@ -613,7 +1399,22 @@ async function handleEntryDrop(event) {
       if (response.ok) {
         const payload = await response.json();
         console.log("Server returned entries:", payload.entries);
+        syncLossMetadataFromPayload(payload);
         const list = normalizeEntries(payload.entries, true);
+        if (Array.isArray(payload.prizeConfigs)) {
+          prizeConfigurations = {};
+          payload.prizeConfigs.forEach((config) => {
+            prizeConfigurations[normalizeLabel(config.prizeName)] = {
+              maxWins: config.maxWins || 1,
+              currentWins: config.currentWins || 0,
+              isEternal: config.isEternal || false,
+              isDisabled: config.isDisabled || false,
+              lossMessage: config.lossMessage || "",
+              lossType: config.lossType || "",
+            };
+          });
+        }
+        await loadPrizeConfigurations();
         applyEntriesUpdate(list);
         renderAdminEntries(list);
         resultText.textContent = "Wheel entries reordered.";
@@ -646,6 +1447,7 @@ function handleEntryDragEnd(event) {
 
 function renderAdminEntries(adminEntries) {
   adminEntriesList.innerHTML = "";
+  updatePrizeStats();
 
   const searchTerm = (prizeSearchInput?.value || "").toLowerCase().trim();
   const sortMode = prizeSortSelect?.value || "default";
@@ -664,13 +1466,20 @@ function renderAdminEntries(adminEntries) {
   }
 
   if (sortedEntries.length === 0) {
+    if (wheelFieldsCountBadge) {
+      wheelFieldsCountBadge.textContent = "0 fields";
+    }
     const emptyItem = document.createElement("li");
     emptyItem.className = "admin-entries-item";
     emptyItem.innerHTML = searchTerm 
-      ? `<span class="admin-entries-item__label">No prizes match "${searchTerm}"</span>`
-      : "<span class=\"admin-entries-item__label\">No wheel entries configured.</span>";
+      ? `<span class="admin-entries-item__label">No wheel fields match "${searchTerm}"</span>`
+      : "<span class=\"admin-entries-item__label\">No wheel fields configured.</span>";
     adminEntriesList.appendChild(emptyItem);
     return;
+  }
+
+  if (wheelFieldsCountBadge) {
+    wheelFieldsCountBadge.textContent = `${sortedEntries.length} ${sortedEntries.length === 1 ? "field" : "fields"}`;
   }
 
   const fragment = document.createDocumentFragment();
@@ -683,15 +1492,28 @@ function renderAdminEntries(adminEntries) {
    // Store the original index in allEntries for proper reordering
    item.dataset.originalIndex = allEntries.indexOf(entry);
 
+   const normalized = normalizeLabel(entry);
+   const config = prizeConfigurations[normalized] || { maxWins: 1, currentWins: 0, isEternal: false, isDisabled: false };
+   prizeConfigurations[normalized] = config;
+   const localPrizeWins = getLocalPrizeWinCount(entry);
+   const displayedWins = Math.max(config.currentWins || 0, localPrizeWins);
+   const lossEntry = isLossEntry(entry);
+
    const label = document.createElement("span");
    label.className = "admin-entries-item__label";
    label.textContent = entry;
 
-   const normalized = normalizeLabel(entry);
-   const config = prizeConfigurations[normalized] || { maxWins: 1, currentWins: 0, isEternal: false };
-   const localPrizeWins = getLocalPrizeWinCount(entry);
-   const displayedWins = Math.max(config.currentWins || 0, localPrizeWins);
-    
+   const labelBlock = document.createElement("div");
+   labelBlock.className = "admin-entries-item__label-block";
+   labelBlock.appendChild(label);
+
+   if (lossEntry) {
+     const lossMessagePreview = document.createElement("span");
+     lossMessagePreview.className = "admin-entries-item__loss-message";
+     lossMessagePreview.textContent = getLossMessageForEntry(entry) || "No cute message saved.";
+     labelBlock.appendChild(lossMessagePreview);
+   }
+     
    const configDiv = document.createElement("div");
    configDiv.className = "admin-entries-item__config";
     
@@ -715,24 +1537,75 @@ function renderAdminEntries(adminEntries) {
    eternalCheckbox.type = "checkbox";
    eternalCheckbox.className = "admin-entries-item__eternal-checkbox";
    eternalCheckbox.checked = config.isEternal || false;
+   const refreshRowConfigDisplay = () => {
+     const isEternal = eternalCheckbox.checked;
+     const isDisabled = Boolean(config.isDisabled);
+     const configuredMaxWins = parseInt(maxWinsSelect.value, 10) || config.maxWins || 1;
+     item.classList.toggle("is-forever", isEternal);
+     item.classList.toggle("is-disabled", isDisabled);
+     configDiv.style.display = isEternal || lossEntry ? "none" : "";
+     winCountSpan.textContent = lossEntry
+       ? (isDisabled ? "(Loss • Disabled)" : "(Loss)")
+       : (isEternal
+         ? (isDisabled ? "(Disabled • Forever)" : "(Forever)")
+         : (isDisabled ? "(Disabled)" : `(Won ${displayedWins}/${configuredMaxWins})`));
+   };
+
+   const persistRowConfig = () => {
+     const maxWins = parseInt(maxWinsSelect.value, 10);
+     const isEternal = eternalCheckbox.checked;
+     const isDisabled = Boolean(config.isDisabled);
+     void updatePrizeConfiguration(entry, maxWins, isEternal, isDisabled);
+   };
+
    eternalCheckbox.addEventListener("change", () => {
-     const maxWins = parseInt(maxWinsSelect.value, 10);
-     const isEternal = eternalCheckbox.checked;
-     void updatePrizeConfiguration(entry, maxWins, isEternal);
+     config.isEternal = eternalCheckbox.checked;
+     refreshRowConfigDisplay();
+     persistRowConfig();
    });
-    
+
    maxWinsSelect.addEventListener("change", () => {
-     const maxWins = parseInt(maxWinsSelect.value, 10);
-     const isEternal = eternalCheckbox.checked;
-     void updatePrizeConfiguration(entry, maxWins, isEternal);
+     config.maxWins = parseInt(maxWinsSelect.value, 10) || config.maxWins || 1;
+     refreshRowConfigDisplay();
+     persistRowConfig();
    });
-    
+
+   const toggleActiveButton = document.createElement("button");
+   toggleActiveButton.className = "admin-entries-item__toggle-active";
+   toggleActiveButton.type = "button";
+
+   const refreshToggleButton = () => {
+     const isDisabled = Boolean(config.isDisabled);
+     toggleActiveButton.textContent = isDisabled ? "Enable" : "Disable";
+     toggleActiveButton.setAttribute("aria-label", isDisabled ? "Enable prize on wheel" : "Disable prize on wheel");
+   };
+
+   toggleActiveButton.addEventListener("click", () => {
+     config.isDisabled = !config.isDisabled;
+     refreshToggleButton();
+     refreshRowConfigDisplay();
+     initializeEntriesFromState();
+     drawWheel(currentRotation);
+     updateSpinAvailability();
+     persistRowConfig();
+   });
+
+   refreshToggleButton();
+
+   const deleteButton = document.createElement("button");
+   deleteButton.className = "admin-entries-item__remove";
+   deleteButton.type = "button";
+   deleteButton.textContent = "Delete";
+   deleteButton.addEventListener("click", () => {
+     void removeAdminEntry(allEntries.indexOf(entry), entry);
+   });
+
    configDiv.append(maxWinsLabel, maxWinsSelect);
-    
+
    const winCountSpan = document.createElement("span");
    winCountSpan.className = "admin-entries-item__win-count";
-   winCountSpan.textContent = `(Won ${displayedWins}/${config.maxWins})`;
-    
+   refreshRowConfigDisplay();
+
    const eternalContainer = document.createElement("div");
    eternalContainer.className = "admin-entries-item__eternal-container";
    eternalContainer.appendChild(eternalCheckbox);
@@ -743,14 +1616,6 @@ function renderAdminEntries(adminEntries) {
    dragHandle.textContent = "⋮⋮";
    dragHandle.title = "Click and drag to reorder entries";
 
-   const removeButton = document.createElement("button");
-   removeButton.className = "admin-entries-item__remove";
-   removeButton.type = "button";
-   removeButton.textContent = "Remove";
-   removeButton.addEventListener("click", () => {
-     void removeAdminEntry(allEntries.indexOf(entry));
-   });
-
    // Add drag event listeners
    item.addEventListener("dragstart", handleEntryDragStart);
    item.addEventListener("dragenter", handleEntryDragEnter);
@@ -759,7 +1624,7 @@ function renderAdminEntries(adminEntries) {
    item.addEventListener("dragend", handleEntryDragEnd);
    item.addEventListener("dragleave", handleEntryDragLeave);
 
-   item.append(dragHandle, eternalContainer, label, configDiv, winCountSpan, removeButton);
+   item.append(dragHandle, eternalContainer, labelBlock, configDiv, winCountSpan, toggleActiveButton, deleteButton);
    fragment.appendChild(item);
   });
 
@@ -782,7 +1647,21 @@ async function loadAdminEntries() {
   }
 
   const payload = await response.json();
+  syncLossMetadataFromPayload(payload);
   const list = normalizeEntries(payload.entries, true);
+  if (Array.isArray(payload.prizeConfigs)) {
+    prizeConfigurations = {};
+    payload.prizeConfigs.forEach((config) => {
+      prizeConfigurations[normalizeLabel(config.prizeName)] = {
+        maxWins: config.maxWins || 1,
+        currentWins: config.currentWins || 0,
+        isEternal: config.isEternal || false,
+        isDisabled: config.isDisabled || false,
+        lossMessage: config.lossMessage || "",
+        lossType: config.lossType || "",
+      };
+    });
+  }
   renderAdminEntries(list);
   applyEntriesUpdate(list);
 }
@@ -795,8 +1674,14 @@ async function addAdminEntry() {
   }
 
   const label = adminEntryInput.value.trim();
+  const message = adminLossMessageInput?.value.trim() || "";
+  const lossType = adminLossTypeSelect?.value === "free-spin" ? "free-spin" : "loss";
   if (!label) {
     resultText.textContent = "Enter an entry label before adding.";
+    return;
+  }
+  if (!message) {
+    resultText.textContent = "Enter the bottom message for this loss entry.";
     return;
   }
 
@@ -811,7 +1696,7 @@ async function addAdminEntry() {
         "Content-Type": "application/json",
         ...headers,
       },
-      body: JSON.stringify({ label }),
+      body: JSON.stringify({ label, message, lossType }),
     });
     if (!response.ok) {
       const payload = await response.json().catch(() => ({}));
@@ -819,11 +1704,34 @@ async function addAdminEntry() {
     }
 
     const payload = await response.json();
+    syncLossMetadataFromPayload(payload);
     const list = normalizeEntries(payload.entries, true);
+    if (Array.isArray(payload.prizeConfigs)) {
+      prizeConfigurations = {};
+      payload.prizeConfigs.forEach((config) => {
+        prizeConfigurations[normalizeLabel(config.prizeName)] = {
+          maxWins: config.maxWins || 1,
+          currentWins: config.currentWins || 0,
+          isEternal: config.isEternal || false,
+          isDisabled: config.isDisabled || false,
+          lossMessage: config.lossMessage || "",
+          lossType: config.lossType || "",
+        };
+      });
+    }
     adminEntryInput.value = "";
+    if (adminLossMessageInput) {
+      adminLossMessageInput.value = "";
+    }
+    if (adminLossTypeSelect) {
+      adminLossTypeSelect.value = "loss";
+    }
+    await loadPrizeConfigurations();
     renderAdminEntries(list);
     applyEntriesUpdate(list);
-    resultText.textContent = `Added wheel entry: ${label}.`;
+    resultText.textContent = payload.action === "updated"
+      ? `Updated loss entry: ${label} with a custom loss message.`
+      : `Added wheel entry: ${label}${message ? " with a custom loss message." : "."}`;
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
     resultText.textContent = `Could not add wheel entry (${message}).`;
@@ -833,12 +1741,15 @@ async function addAdminEntry() {
   }
 }
 
-async function removeAdminEntry(index) {
+async function removeAdminEntry(index, entryLabel = "") {
   const headers = getAdminRequestHeaders();
   if (!headers) {
     resultText.textContent = "Admin login is required before managing entries.";
     return;
   }
+
+  const removedEntry = entryLabel || allEntries[index];
+  const normalizedRemovedEntry = normalizeLabel(removedEntry);
 
   try {
     const response = await fetch(adminEntriesApiUrl, {
@@ -847,21 +1758,86 @@ async function removeAdminEntry(index) {
         "Content-Type": "application/json",
         ...headers,
       },
-      body: JSON.stringify({ index }),
+      body: JSON.stringify({ index, label: removedEntry }),
     });
     if (!response.ok) {
+      if (response.status === 404) {
+        await loadAdminEntries();
+      }
       const payload = await response.json().catch(() => ({}));
       throw new Error(payload.error || `Request failed (${response.status})`);
     }
 
     const payload = await response.json();
+    syncLossMetadataFromPayload(payload);
     const list = normalizeEntries(payload.entries, true);
+    if (Array.isArray(payload.prizeConfigs)) {
+      prizeConfigurations = {};
+      payload.prizeConfigs.forEach((config) => {
+        prizeConfigurations[normalizeLabel(config.prizeName)] = {
+          maxWins: config.maxWins || 1,
+          currentWins: config.currentWins || 0,
+          isEternal: config.isEternal || false,
+          isDisabled: config.isDisabled || false,
+          lossMessage: config.lossMessage || "",
+          lossType: config.lossType || "",
+        };
+      });
+    }
+    await loadPrizeConfigurations();
+    let syncedConfigMessages = [];
+
+    if (normalizedRemovedEntry) {
+      const nextMilestoneSchedule = Object.fromEntries(
+        Object.entries(milestoneSpinSchedule).filter(([, prizeName]) => normalizeLabel(prizeName) !== normalizedRemovedEntry)
+      );
+      const nextRegularPrizeNames = regularSpinPrizeNames.filter(
+        (prizeName) => normalizeLabel(prizeName) !== normalizedRemovedEntry
+      );
+      const milestoneChanged = Object.keys(nextMilestoneSchedule).length !== Object.keys(milestoneSpinSchedule).length;
+      const regularChanged = nextRegularPrizeNames.length !== regularSpinPrizeNames.length;
+
+      if (milestoneChanged) {
+        const milestoneResponse = await fetch(adminMilestoneConfigApiUrl, {
+          method: "POST",
+          cache: "no-store",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({ milestoneSpinSchedule: nextMilestoneSchedule }),
+        });
+        if (!milestoneResponse.ok) {
+          const milestonePayload = await milestoneResponse.json().catch(() => ({}));
+          throw new Error(milestonePayload.error || `Could not sync milestone spins (${milestoneResponse.status})`);
+        }
+        milestoneSpinSchedule = normalizeMilestoneSchedule(nextMilestoneSchedule);
+        renderMilestoneSpinRows(milestoneSpinSchedule);
+        syncedConfigMessages.push("milestone schedule");
+      }
+
+      if (regularChanged) {
+        const regularResponse = await fetch(adminRegularPrizeConfigApiUrl, {
+          method: "POST",
+          cache: "no-store",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({ regularPrizeNames: nextRegularPrizeNames }),
+        });
+        if (!regularResponse.ok) {
+          const regularPayload = await regularResponse.json().catch(() => ({}));
+          throw new Error(regularPayload.error || `Could not sync regular prizes (${regularResponse.status})`);
+        }
+        regularSpinPrizeNames = normalizeRegularPrizeNames(nextRegularPrizeNames);
+        renderRegularPrizeRows(regularSpinPrizeNames);
+        syncedConfigMessages.push("regular prizes");
+      }
+    }
+
     renderAdminEntries(list);
     applyEntriesUpdate(list);
-    resultText.textContent = "Wheel entry removed.";
+    resultText.textContent = syncedConfigMessages.length > 0
+      ? `Prize deleted from wheel and ${syncedConfigMessages.join(" + ")}.`
+      : "Prize deleted from wheel.";
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
-    resultText.textContent = `Could not remove wheel entry (${message}).`;
+    resultText.textContent = `Could not delete prize (${message}).`;
   }
 }
 
@@ -887,6 +1863,9 @@ async function loadPrizeConfigurations() {
          maxWins: config.maxWins || 1,
          currentWins: config.currentWins || 0,
          isEternal: config.isEternal || false,
+         isDisabled: config.isDisabled || false,
+         lossMessage: config.lossMessage || "",
+         lossType: config.lossType || "",
        };
      });
    }
@@ -899,7 +1878,127 @@ async function loadPrizeConfigurations() {
   }
 }
 
-async function updatePrizeConfiguration(prizeName, maxWins, isEternal) {
+async function loadMilestoneSchedule() {
+const headers = getAdminRequestHeaders();
+const apiUrl = headers ? adminMilestoneConfigApiUrl : publicMilestoneConfigApiUrl;
+const requestHeaders = headers ? { headers } : {};
+const shouldPersist = Boolean(headers);
+
+try {
+   const response = await fetch(apiUrl, {
+     cache: "no-store",
+     ...requestHeaders,
+   });
+   if (!response.ok) {
+     const payload = await response.json().catch(() => ({}));
+     throw new Error(payload.error || `Request failed (${response.status})`);
+   }
+
+   const payload = await response.json();
+   const loadedSchedule = normalizeMilestoneSchedule(payload.milestoneSpinSchedule || payload.schedule || {});
+   renderMilestoneSpinRows(loadedSchedule);
+   await syncMilestonePrizeEntries(loadedSchedule, { persist: shouldPersist });
+} catch (error) {
+   const message = error instanceof Error ? error.message : "Unknown error";
+   console.warn(`Could not load milestone schedule (${message}).`);
+   renderMilestoneSpinRows(milestoneSpinSchedule);
+}
+}
+
+async function loadRegularPrizeNames() {
+const headers = getAdminRequestHeaders();
+const apiUrl = headers ? adminRegularPrizeConfigApiUrl : publicRegularPrizeConfigApiUrl;
+const requestHeaders = headers ? { headers } : {};
+const shouldPersist = Boolean(headers);
+
+try {
+   const response = await fetch(apiUrl, {
+     cache: "no-store",
+     ...requestHeaders,
+   });
+   if (!response.ok) {
+     const payload = await response.json().catch(() => ({}));
+     throw new Error(payload.error || `Request failed (${response.status})`);
+   }
+
+   const payload = await response.json();
+   const loadedNames = normalizeRegularPrizeNames(payload.regularPrizeNames || payload.prizes || []);
+   renderRegularPrizeRows(loadedNames);
+   await syncRegularPrizeEntries(loadedNames, { persist: shouldPersist });
+} catch (error) {
+   const message = error instanceof Error ? error.message : "Unknown error";
+   console.warn(`Could not load regular prize names (${message}).`);
+   renderRegularPrizeRows(regularSpinPrizeNames);
+}
+}
+
+async function saveMilestoneSchedule() {
+const headers = getAdminRequestHeaders();
+if (!headers) {
+   resultText.textContent = "Admin login is required before editing milestone spins.";
+   return;
+}
+
+const schedule = collectMilestoneRows();
+
+try {
+   const response = await fetch(adminMilestoneConfigApiUrl, {
+     method: "POST",
+     cache: "no-store",
+     headers: { ...headers, "Content-Type": "application/json" },
+     body: JSON.stringify({ milestoneSpinSchedule: schedule }),
+   });
+
+   if (!response.ok) {
+     const payload = await response.json().catch(() => ({}));
+     throw new Error(payload.error || `Request failed (${response.status})`);
+   }
+
+   const payload = await response.json();
+   const savedSchedule = normalizeMilestoneSchedule(payload.milestoneSpinSchedule || payload.schedule || schedule);
+   renderMilestoneSpinRows(savedSchedule);
+   await syncMilestonePrizeEntries(savedSchedule, { persist: true });
+   resultText.textContent = "Updated milestone prize spins.";
+} catch (error) {
+   const message = error instanceof Error ? error.message : "Unknown error";
+   resultText.textContent = `Could not save milestone spins (${message}).`;
+}
+}
+
+async function saveRegularPrizeNames() {
+const headers = getAdminRequestHeaders();
+if (!headers) {
+   resultText.textContent = "Admin login is required before editing regular prize names.";
+   return;
+}
+
+const names = collectRegularPrizeRows();
+
+try {
+   const response = await fetch(adminRegularPrizeConfigApiUrl, {
+     method: "POST",
+     cache: "no-store",
+     headers: { ...headers, "Content-Type": "application/json" },
+     body: JSON.stringify({ regularPrizeNames: names }),
+   });
+
+   if (!response.ok) {
+     const payload = await response.json().catch(() => ({}));
+     throw new Error(payload.error || `Request failed (${response.status})`);
+   }
+
+   const payload = await response.json();
+   const savedNames = normalizeRegularPrizeNames(payload.regularPrizeNames || payload.prizes || names);
+   renderRegularPrizeRows(savedNames);
+   await syncRegularPrizeEntries(savedNames, { persist: true });
+   resultText.textContent = names.length > 0 ? "Updated regular prize names." : "Cleared regular prize names.";
+} catch (error) {
+   const message = error instanceof Error ? error.message : "Unknown error";
+   resultText.textContent = `Could not save regular prize names (${message}).`;
+}
+}
+
+async function updatePrizeConfiguration(prizeName, maxWins, isEternal, isDisabled = false) {
   const headers = getAdminRequestHeaders();
   if (!headers) {
    resultText.textContent = "Admin login is required before managing prize configuration.";
@@ -911,7 +2010,7 @@ async function updatePrizeConfiguration(prizeName, maxWins, isEternal) {
      method: "POST",
      cache: "no-store",
      headers: { ...headers, "Content-Type": "application/json" },
-     body: JSON.stringify({ prizeName, maxWins, isEternal: isEternal || false }),
+     body: JSON.stringify({ prizeName, maxWins, isEternal: isEternal || false, isDisabled: isDisabled || false }),
    });
 
    if (!response.ok) {
@@ -921,7 +2020,8 @@ async function updatePrizeConfiguration(prizeName, maxWins, isEternal) {
 
    await loadPrizeConfigurations();
    const eternalText = isEternal ? " and stays forever" : "";
-   resultText.textContent = `Updated ${prizeName} to be won up to ${maxWins} time(s)${eternalText}.`;
+   const disabledText = isDisabled ? " and is disabled on the wheel" : "";
+   resultText.textContent = `Updated ${prizeName} to be won up to ${maxWins} time(s)${eternalText}${disabledText}.`;
   } catch (error) {
    const message = error instanceof Error ? error.message : "Unknown error";
    resultText.textContent = `Could not update prize configuration (${message}).`;
@@ -1152,44 +2252,11 @@ function showPrizeAnnouncement(winner) {
 }
 
 function getLoseMessage(winner) {
-  const loseKey = getLoseKey(winner);
-  if (loseKey === "so close") {
-    return { primary: "So Close! 😅", secondary: "That was closer in your imagination. 😉" };
-  }
-  if (loseKey === "almost") {
-    return { primary: "Almost! 🤏", secondary: "If the wheel moved just one more click..." };
-  }
-  if (loseKey === "free spin") {
-    return { primary: "Free Spin! 🔄", secondary: "Go again — this one doesn't count you out." };
-  }
-  if (loseKey === "oops") {
-    return { primary: "Oops! 😬", secondary: "Looks like luck took a quick break! 😄" };
-  }
-    if (loseKey === "uh oh") {
-    return { primary: "Uh Oh! ", secondary: "The prize escaped this time!" };
-  }
-    if (loseKey === "maybe next time") {
-    return { primary: "Maybe Next Time! ", secondary: "No prize, but you earned bragging rights for spinning!" };
-  }
-    if (loseKey === "nice try") {
-    return { primary: "Nice Try", secondary: "A+ for effort!" };
-  }
-    if (loseKey === "404: prize not found") {
-    return { primary: "404: Prize Not Found.", secondary: "The wheel is in a silly mood." };
-  }
-    if (loseKey === "close, but no prize") {
-    return { primary: "Close But No Prize!", secondary: "Luck was fashionably late." };
-  }
-    if (loseKey === "no prize this time") {
-    return { primary: "No Prize This Time!", secondary: "No luck this round, but your next spin could hit big." };
-  }
-    if (loseKey === "better luck next time") {
-    return { primary: "Better Luck Next Time! 🍀", secondary: "The wheel wasn't on your side this time—but don't stop smiling!" };
-  }
-    if (loseKey === "not today") {
-    return { primary: "Not Today!", secondary: "Even the wheel needs a coffee break." };
-  }
-  return { primary: "Better Luck Next Time! 🍀", secondary: "The wheel wasn't on your side this time—but don't stop smiling!" };
+  const customSecondary = getLossMessageForEntry(winner);
+  return {
+    primary: formatLossHeadline(winner),
+    secondary: customSecondary || "No message configured.",
+  };
 }
 
 function createLoseEmojiBurst() {
@@ -1247,7 +2314,7 @@ function triggerPointerHit() {
 }
 
 function showResultOverlays(result) {
-  if (getLoseKey(result.winner)) {
+  if (isLossEntry(result.winner)) {
     showLoseAnnouncement(result.winner);
     return;
   }
@@ -1471,13 +2538,11 @@ function getWinningIndexForRotation(rotation, pointerAngle = getPointerAngle()) 
 }
 
 function isRemovablePrize(prize) {
-  const normalized = normalizeLabel(prize);
-
-  // If it's in the non-removable list, never remove it
-  if (nonRemovablePrizes.has(normalized)) {
+  if (isLossEntry(prize)) {
     return false;
   }
-  
+
+  const normalized = normalizeLabel(prize);
   // Check prize configuration - only remove if it has reached max wins and is not eternal
   const config = prizeConfigurations[normalized];
   if (config) {
@@ -1498,21 +2563,37 @@ function isRemovablePrize(prize) {
 }
 
 function isForeverPrize(prize) {
-  const normalized = normalizeLabel(prize);
-  if (nonRemovablePrizes.has(normalized)) {
+  if (isLossEntry(prize)) {
     return true;
   }
 
+  const normalized = normalizeLabel(prize);
   const config = prizeConfigurations[normalized];
   return Boolean(config?.isEternal);
 }
 
-function hasReachedConfiguredLimit(prize) {
+function isPrizeDisabled(prize) {
   const normalized = normalizeLabel(prize);
-  if (nonRemovablePrizes.has(normalized)) {
-    return false;
+  const config = prizeConfigurations[normalized];
+  return Boolean(config?.isDisabled);
+}
+
+function getConfiguredWheelEntries(sourceEntries) {
+  const normalizedSource = normalizeEntries(sourceEntries, true);
+  const hasConfigState = Object.keys(prizeConfigurations).length > 0;
+  if (!hasConfigState) {
+    return normalizedSource;
   }
 
+  return normalizedSource.filter((entry) => !hasReachedConfiguredLimit(entry) && !isPrizeDisabled(entry));
+}
+
+function hasReachedConfiguredLimit(prize) {
+  if (isLossEntry(prize)) {
+   return false;
+  }
+
+  const normalized = normalizeLabel(prize);
   const config = prizeConfigurations[normalized];
   if (!config || config.isEternal) {
     return false;
@@ -1531,7 +2612,7 @@ function getLocalPrizeWinCount(prize) {
     }
 
     const wonPrize = String(win.winner || "");
-    if (getLoseKey(wonPrize)) {
+    if (isLossEntry(wonPrize)) {
       return total;
     }
 
@@ -1552,9 +2633,8 @@ function removeEntryOnce(target) {
 function completeTurn(winner, spinCounter = null) {
   const removable = isRemovablePrize(winner);
   const playerSnapshot = activePlayer;
-  const loseKey = getLoseKey(winner);
-  const isFreeSpin = loseKey === "free spin";
-  const outcomeType = isFreeSpin ? "free-spin" : (loseKey ? "loss" : "win");
+  const isFreeSpin = isFreeSpinEntry(winner);
+  const outcomeType = isFreeSpin ? "free-spin" : (isLossEntry(winner) ? "loss" : "win");
   const wonAt = new Date().toISOString();
   const spinNumber = spinCounter?.spinNumber ?? null;
   const spinDateKey = spinCounter?.spinDateKey ?? null;
@@ -1587,7 +2667,7 @@ function completeTurn(winner, spinCounter = null) {
   state.currentRotation = currentRotation;
   saveState();
 
-  resultText.textContent = isFreeSpin ? "Free spin! Press spin to play again." : `Winner: ${winner}`;
+  resultText.textContent = `Winner: ${winner}`;
   currentPlayerText.textContent = isFreeSpin && playerSnapshot
    ? `Player: ${playerSnapshot.name} (${playerSnapshot.school})`
    : "Waiting for player details.";
@@ -1605,7 +2685,7 @@ function finalizePendingTurn() {
    return;
   }
 
-  if (!getLoseKey(pendingTurn.winner)) {
+  if (!isLossEntry(pendingTurn.winner)) {
     void recordPrizeWin(pendingTurn.winner);
   }
 
@@ -1619,7 +2699,7 @@ function finalizePendingTurn() {
    if (playerSnapshot) {
      activePlayer = playerSnapshot;
      currentPlayerText.textContent = `Player: ${playerSnapshot.name} (${playerSnapshot.school})`;
-     resultText.textContent = "Free spin! Press spin to play again.";
+     resultText.textContent = `Winner: ${pendingTurn.winner}`;
    }
    state.pendingTurn = null;
    state.currentRotation = currentRotation;
@@ -1682,7 +2762,7 @@ async function spinWheel() {
       // Fallback if prize not found on wheel
       const prizeIndices = entries
         .map((entry, index) => ({ entry, index }))
-        .filter(({ entry }) => getLoseKey(entry) === null)
+        .filter(({ entry }) => !isLossEntry(entry))
         .map(({ index }) => index);
       winningIndex = prizeIndices.length > 0
         ? prizeIndices[Math.floor(Math.random() * prizeIndices.length)]
@@ -1692,15 +2772,15 @@ async function spinWheel() {
     // Regular spin - losses, plus Troos Prys and Pilot Juice Pen only.
     const loseIndices = entries
       .map((entry, index) => ({ entry, index }))
-      .filter(({ entry }) => getLoseKey(entry) !== null)
+      .filter(({ entry }) => isLossEntry(entry))
       .map(({ index }) => index);
     const regularPrizeIndices = entries
       .map((entry, index) => ({ entry, index }))
-      .filter(({ entry }) => getLoseKey(entry) === null && !isMilestonePrize(entry) && isRegularSpinPrize(entry))
+      .filter(({ entry }) => !isLossEntry(entry) && !isMilestonePrize(entry) && isRegularSpinPrize(entry))
       .map(({ index }) => index);
     
     if (loseIndices.length > 0 && regularPrizeIndices.length > 0) {
-      const pickLose = Math.random() < 0.9;
+      const pickLose = Math.random() < regularSpinLossChance;
       const selectedIndices = pickLose ? loseIndices : regularPrizeIndices;
       winningIndex = selectedIndices[Math.floor(Math.random() * selectedIndices.length)];
     } else if (loseIndices.length > 0) {
@@ -1775,6 +2855,12 @@ async function loadJsonEntries() {
       throw new Error("Expected an array or { entries: [] }");
     }
 
+    if (Array.isArray(json)) {
+      lossMessages = {};
+      lossTypes = {};
+    } else {
+      syncLossMetadataFromPayload(json);
+    }
     allEntries = normalizeEntries(fromJson, true);
   } catch (error) {
     try {
@@ -1789,8 +2875,16 @@ async function loadJsonEntries() {
         throw new Error("Expected an array or { entries: [] }");
       }
 
+      if (Array.isArray(json)) {
+        lossMessages = {};
+        lossTypes = {};
+      } else {
+        syncLossMetadataFromPayload(json);
+      }
       allEntries = normalizeEntries(fromJson, true);
     } catch {
+      lossMessages = {};
+      lossTypes = {};
       allEntries = ["Option 1", "Option 2"];
     }
     const message = error instanceof Error ? error.message : "Unknown error";
@@ -1799,11 +2893,10 @@ async function loadJsonEntries() {
 }
 
 function initializeEntriesFromState() {
-  const sourceEntries = normalizeEntries(allEntries, true);
+  const sourceEntries = getConfiguredWheelEntries(allEntries);
   const availableEntries = normalizeEntries(state.availableEntries, true);
-  const hasConfigState = Object.keys(prizeConfigurations).length > 0;
-  entries = hasConfigState
-    ? sourceEntries.filter((entry) => !hasReachedConfiguredLimit(entry))
+  entries = Object.keys(prizeConfigurations).length > 0
+    ? sourceEntries
     : (state.initialized
       ? reconcileAvailableEntries(availableEntries, sourceEntries)
       : [...sourceEntries]);
@@ -1858,6 +2951,7 @@ async function handlePlayerSubmit(event) {
     });
     state.participants = normalizeParticipants(state.participants);
     saveState();
+    renderEntriesTable();
 
     currentPlayerText.textContent = `Player: ${activePlayer.name} (${activePlayer.school})`;
     resultText.textContent = "Press spin to choose a winner.";
@@ -1922,7 +3016,15 @@ window.addEventListener("resize", resizeConfettiCanvas);
 prizeContinueButton.addEventListener("click", finalizePendingTurn);
 loseContinueButton.addEventListener("click", finalizePendingTurn);
 adminLoginButton.addEventListener("click", handleAdminLogin);
-downloadExportButton.addEventListener("click", downloadParticipantsExport);
+exportAdminEmailInput?.addEventListener("input", () => setAdminLoginError(""));
+exportAccessKeyInput?.addEventListener("input", () => setAdminLoginError(""));
+downloadExportButton?.addEventListener("click", downloadParticipantsExport);
+downloadEntriesExportButton?.addEventListener("click", () => {
+  void downloadEntriesExport();
+});
+entriesFromDateInput?.addEventListener("change", renderEntriesTable);
+entriesToDateInput?.addEventListener("change", renderEntriesTable);
+entriesDateSortSelect?.addEventListener("change", renderEntriesTable);
 addAdminEntryButton.addEventListener("click", () => {
   void addAdminEntry();
 });
@@ -1932,8 +3034,54 @@ adminEntryInput.addEventListener("keydown", (event) => {
     void addAdminEntry();
   }
 });
+
+addMilestoneSpinRowButton?.addEventListener("click", () => {
+  if (milestoneSpinRows) {
+    milestoneSpinRows.appendChild(createMilestoneRow());
+  }
+});
+
+milestoneSpinRows?.addEventListener("keydown", (event) => {
+  if (event.target instanceof HTMLInputElement && event.key === "Enter") {
+    event.preventDefault();
+    void saveMilestoneSchedule();
+  }
+});
+
+addRegularPrizeRowButton?.addEventListener("click", () => {
+  if (regularPrizeRows) {
+    regularPrizeRows.appendChild(createRegularPrizeRow());
+  }
+});
+
+regularPrizeRows?.addEventListener("keydown", (event) => {
+  if (event.target instanceof HTMLInputElement && event.key === "Enter") {
+    event.preventDefault();
+    void saveRegularPrizeNames();
+  }
+});
+
+saveMilestoneSpinScheduleButton?.addEventListener("click", () => {
+  void saveMilestoneSchedule();
+});
+
+saveRegularPrizeNamesButton?.addEventListener("click", () => {
+  void saveRegularPrizeNames();
+});
 resetPrizeWinsButton?.addEventListener("click", () => {
   void resetPrizeWinCounts();
+});
+loadSpinCounterButton?.addEventListener("click", () => {
+  void loadAdminSpinCounter();
+});
+saveSpinCounterButton?.addEventListener("click", () => {
+  void saveAdminSpinCounter();
+});
+spinCounterValueInput?.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    void saveAdminSpinCounter();
+  }
 });
 
 prizeSearchInput?.addEventListener("input", () => {
@@ -1947,22 +3095,33 @@ prizeSortSelect?.addEventListener("change", () => {
 });
 
 // Tab switching functionality
-document.querySelectorAll(".admin-tab-btn").forEach((btn) => {
+adminTabButtons.forEach((btn) => {
   btn.addEventListener("click", () => {
     const tabName = btn.getAttribute("data-tab");
-    
-    // Update active button
-    document.querySelectorAll(".admin-tab-btn").forEach((b) => b.classList.remove("active"));
-    btn.classList.add("active");
-    
-    // Update active content
-    document.querySelectorAll(".admin-tab-content").forEach((content) => {
-      content.classList.remove("active");
-    });
-    const tabContent = document.getElementById(`${tabName}-tab`);
-    if (tabContent) {
-      tabContent.classList.add("active");
+
+    if (tabName) {
+      activateAdminTab(tabName);
+      setActiveSidebarSection("prizes");
+      if (adminSectionTitle) {
+        adminSectionTitle.textContent = "Prize Settings";
+      }
+      if (adminSectionSubtitle) {
+        adminSectionSubtitle.textContent = "Manage the prizes and odds for your wheel.";
+      }
+      adminTabs?.classList.remove("is-hidden");
     }
+  });
+});
+
+sidebarItems.forEach((item) => {
+  item.addEventListener("click", () => {
+    const sectionName = item.dataset.adminSection;
+    if (sectionName === "entries" || sectionName === "prizes") {
+      setAdminSection(sectionName);
+      return;
+    }
+
+    setActiveSidebarSection(sectionName || "prizes");
   });
 });
 
@@ -1981,11 +3140,30 @@ if (adminEntriesList) {
 
 async function init() {
   setExportToolsVisibility(false);
+  setAdminSection("prizes");
+  if (spinCounterDateInput) {
+    spinCounterDateInput.value = getTodayDateKey();
+  }
   resizeConfettiCanvas();
   loadState();
   await loadParticipantsFromServer();
+  const participantDateBounds = getParticipantsDateBounds(normalizeParticipants(state.participants));
+  if (entriesDateSortSelect) {
+    entriesDateSortSelect.value = "newest";
+  }
+  if (participantDateBounds) {
+    if (entriesFromDateInput) {
+      entriesFromDateInput.value = participantDateBounds.fromDate;
+    }
+    if (entriesToDateInput) {
+      entriesToDateInput.value = participantDateBounds.toDate;
+    }
+  }
+  renderEntriesTable();
   await loadJsonEntries();
   await loadPrizeConfigurations();
+  await loadMilestoneSchedule();
+  await loadRegularPrizeNames();
   initializeEntriesFromState();
   if (!restorePendingTurn()) {
     drawWheel(currentRotation);
