@@ -1882,7 +1882,6 @@ async function loadMilestoneSchedule() {
 const headers = getAdminRequestHeaders();
 const apiUrl = headers ? adminMilestoneConfigApiUrl : publicMilestoneConfigApiUrl;
 const requestHeaders = headers ? { headers } : {};
-const shouldPersist = Boolean(headers);
 
 try {
    const response = await fetch(apiUrl, {
@@ -1898,7 +1897,7 @@ try {
    const loadedSchedule = normalizeMilestoneSchedule(payload.milestoneSpinSchedule || payload.schedule || {});
    milestoneSpinSchedule = loadedSchedule;
    renderMilestoneSpinRows(loadedSchedule);
-   await syncMilestonePrizeEntries(loadedSchedule, { persist: shouldPersist });
+   await syncMilestonePrizeEntries(loadedSchedule, { persist: false });
 } catch (error) {
    const message = error instanceof Error ? error.message : "Unknown error";
    console.warn(`Could not load milestone schedule (${message}).`);
@@ -1910,7 +1909,6 @@ async function loadRegularPrizeNames() {
 const headers = getAdminRequestHeaders();
 const apiUrl = headers ? adminRegularPrizeConfigApiUrl : publicRegularPrizeConfigApiUrl;
 const requestHeaders = headers ? { headers } : {};
-const shouldPersist = Boolean(headers);
 
 try {
    const response = await fetch(apiUrl, {
@@ -1926,7 +1924,7 @@ try {
    const loadedNames = normalizeRegularPrizeNames(payload.regularPrizeNames || payload.prizes || []);
    regularSpinPrizeNames = loadedNames;
    renderRegularPrizeRows(loadedNames);
-   await syncRegularPrizeEntries(loadedNames, { persist: shouldPersist });
+   await syncRegularPrizeEntries(loadedNames, { persist: false });
 } catch (error) {
    const message = error instanceof Error ? error.message : "Unknown error";
    console.warn(`Could not load regular prize names (${message}).`);
