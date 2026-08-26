@@ -1030,16 +1030,8 @@ export async function handleReorderAdminEntries(req, res) {
   }
 
   try {
-    const entries = await getCurrentEntriesForAdmin();
     const lossMessages = await getConfiguredLossMessages();
     const lossTypes = await getConfiguredLossTypes();
-     
-    // Validate that the order contains the same entries
-    if (order.length !== entries.length || !order.every(e => entries.includes(e))) {
-      res.status(400).json({ error: 'Invalid order: entries do not match.' });
-      return;
-    }
-
     const updatedEntries = await saveConfiguredEntries(order, lossMessages, lossTypes);
     res.status(200).json({ entries: updatedEntries, lossMessages, lossTypes });
   } catch (error) {
