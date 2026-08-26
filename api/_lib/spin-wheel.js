@@ -14,6 +14,7 @@ const databaseName = process.env.MONGODB_DB || 'SpinTheWheel';
 const collectionName = process.env.MONGODB_COLLECTION || 'spin_the_wheel_entries';
 const spinCounterCollectionName = process.env.MONGODB_SPIN_COUNTER_COLLECTION || 'spin_daily_counters';
 const entriesConfigCollectionName = process.env.MONGODB_ENTRIES_COLLECTION || 'spin_the_wheel_config';
+const spinResultsCollectionName = process.env.MONGODB_SPIN_RESULTS_COLLECTION || 'spin_wheel_results';
 const entriesConfigDocumentId = 'wheel_entries';
 const exportAdminEmail = String(process.env.EXPORT_ADMIN_EMAIL || 'katapills@gmail.com').trim().toLowerCase();
 const exportAccessKey = String(process.env.EXPORT_ACCESS_KEY || 'Admin2468!').trim();
@@ -178,6 +179,14 @@ export async function getSpinCounterCollection() {
   const database = await connectToDatabase();
   const collection = database.collection(spinCounterCollectionName);
   await collection.createIndex({ dateKey: 1 }, { unique: true });
+  return collection;
+}
+
+export async function getSpinResultsCollection() {
+  const database = await connectToDatabase();
+  const collection = database.collection(spinResultsCollectionName);
+  await collection.createIndex({ spunAt: 1 });
+  await collection.createIndex({ winner: 1, spunAt: -1 });
   return collection;
 }
 
@@ -380,6 +389,73 @@ export async function updateRegularPrizeNames(prizes) {
   return normalizedNames;
 }
 
+export function normalizeSpinResult(payload) {
+  if (!payload || typeof payload !== 'object') {
+    return null;
+  }
+
+  const winner = String(payload.winner || '').trim();
+  if (!winner) {
+    return null;
+  }
+
+  const outcomeType = String(payload.outcomeType || 'win').trim().toLowerCase();
+  const allowedOutcomeTypes = new Set(['win', 'loss', 'free-spin']);
+  const normalizedOutcomeType = allowedOutcomeTypes.has(outcomeType) ? outcomeType : 'win';
+  const player = payload.player && typeof payload.player === 'object' ? payload.player : {};
+  const fullName = String(player.fullName || player.name || '').trim();
+  const school = String(player.school || '').trim();
+  const email = String(player.email || '').trim();
+  const spunAtValue = String(payload.spunAt || '').trim();
+  const spunAt = spunAtValue || new Date().toISOString();
+  const spunAtDate = new Date(spunAt);
+  const spinNumberValue = Number(payload.spinNumber);
+  const spinNumber = Number.isInteger(spinNumberValue) && spinNumberValue > 0 ? spinNumberValue : null;
+  const spinDateKey = String(payload.spinDateKey || '').trim();
+
+  return {
+    id: String(payload.id || randomUUID()),
+    spinNumber,
+    spinDateKey: spinDateKey || null,
+    winner,
+    outcomeType: normalizedOutcomeType,
+    removedFromWheel: Boolean(payload.removedFromWheel),
+    player: {
+      fullName,
+      school,
+      email,
+    },
+    spunAt: Number.isNaN(spunAtDate.getTime()) ? new Date().toISOString() : spunAtDate.toISOString(),
+  };
+}
+
+export async function handleRecordSpinResult(req, res) {
+  let body;
+
+  try {
+    body = await readJsonBody(req);
+  } catch {
+    res.status(400).json({ error: 'Request body must be valid JSON.' });
+    return;
+  }
+
+  const spinResult = normalizeSpinResult(body);
+  if (!spinResult) {
+    res.status(400).json({ error: 'Valid spin result payload is required.' });
+    return;
+  }
+
+  try {
+    const collection = await getSpinResultsCollection();
+    await collection.insertOne(spinResult);
+    res.status(201).json({ status: 'ok' });
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : 'Unable to save spin result',
+    });
+  }
+}
+
 export async function updatePrizeConfig(prizeName, maxWins, isEternal, isDisabled) {
   const collection = await getPrizeConfigCollection();
   const normalizedPrizeName = normalizeEntryLabel(prizeName);
@@ -416,6 +492,77 @@ export async function updatePrizeConfig(prizeName, maxWins, isEternal, isDisable
     await collection.deleteMany({ _id: { $in: duplicates.map((config) => config._id) } });
   }
   return result;
+}
+
+export async function getPrizeConfig(prizeName) {
+  const collection = await getPrizeConfigCollection();
+  const normalizedPrizeName = normalizeEntryLabel(prizeName);
+  const matchingConfigs = (await collection.find({
+    prizeName: { $exists: true, $type: 'string' },
+  }).toArray()).filter((config) => normalizeEntryLabel(config.prizeName) === normalizedPrizeName);
+  const config = matchingConfigs.sort((left, right) => {
+    const leftTime = Date.parse(String(left.updatedAt || '')) || 0;
+    const rightTime = Date.parse(String(right.updatedAt || '')) || 0;
+    return rightTime - leftTime;
+  })[0];
+  if (!config) {
+    return { prizeName, maxWins: 1, currentWins: 0, isEternal: false };
+  }
+  return {
+    prizeName: config.prizeName,
+    maxWins: config.maxWins || 1,
+    currentWins: config.currentWins || 0,
+    isEternal: config.isEternal || false,
+    isDisabled: config.isDisabled || false,
+    lossMessage: config.lossMessage || '',
+    lossType: config.lossType || '',
+  };
+}
+
+export async function incrementPrizeWinCount(prizeName) {
+  const collection = await getPrizeConfigCollection();
+  const normalizedPrizeName = normalizeEntryLabel(prizeName);
+  const matchingConfigs = (await collection.find({
+    prizeName: { $exists: true, $type: 'string' },
+  }).toArray()).filter((config) => normalizeEntryLabel(config.prizeName) === normalizedPrizeName);
+  const timestamp = new Date().toISOString();
+  const update = {
+    $inc: { currentWins: 1 },
+    $set: { updatedAt: timestamp },
+    $setOnInsert: { maxWins: 1 },
+  };
+
+  if (matchingConfigs.length === 0) {
+    return collection.updateOne({ prizeName }, update, { upsert: true });
+  }
+
+  const [primary, ...duplicates] = matchingConfigs.sort((left, right) => {
+    const leftTime = Date.parse(String(left.updatedAt || '')) || 0;
+    const rightTime = Date.parse(String(right.updatedAt || '')) || 0;
+    return rightTime - leftTime;
+  });
+
+  const result = await collection.updateOne(
+    { _id: primary._id },
+    {
+      ...update,
+      $set: {
+        ...update.$set,
+        prizeName,
+      },
+    },
+  );
+
+  if (duplicates.length > 0) {
+    await collection.deleteMany({ _id: { $in: duplicates.map((config) => config._id) } });
+  }
+
+  return result;
+}
+
+export async function resetPrizeWinCounts() {
+  const collection = await getPrizeConfigCollection();
+  await collection.updateMany({}, { $set: { currentWins: 0 } });
 }
 
 export function getHeader(req, name) {
