@@ -1896,6 +1896,7 @@ try {
 
    const payload = await response.json();
    const loadedSchedule = normalizeMilestoneSchedule(payload.milestoneSpinSchedule || payload.schedule || {});
+   milestoneSpinSchedule = loadedSchedule;
    renderMilestoneSpinRows(loadedSchedule);
    await syncMilestonePrizeEntries(loadedSchedule, { persist: shouldPersist });
 } catch (error) {
@@ -1923,6 +1924,7 @@ try {
 
    const payload = await response.json();
    const loadedNames = normalizeRegularPrizeNames(payload.regularPrizeNames || payload.prizes || []);
+   regularSpinPrizeNames = loadedNames;
    renderRegularPrizeRows(loadedNames);
    await syncRegularPrizeEntries(loadedNames, { persist: shouldPersist });
 } catch (error) {
